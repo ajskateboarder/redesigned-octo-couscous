@@ -17,7 +17,6 @@ def rhasattr(obj, path):
     except (AttributeError, TypeError):
         return False
 
-
 class SlicedModel(nn.Module):
     def __init__(self, model, start_layer, end_layer, layers_name=None):
         super().__init__()
@@ -45,6 +44,7 @@ class SlicedModel(nn.Module):
 
     def forward(self, h):
         # mutate model so that forward pass only runs the specified middle layers
+        h = h.to(device=self.model.device, dtype=self.model.dtype)
         self.L = self.layers
         self.depth = self.model.config.num_hidden_layers
         layers_name_split = self.layers_name_split
@@ -52,25 +52,28 @@ class SlicedModel(nn.Module):
         setattr(self.model.config, "num_hidden_layers",self.end_layer-self.start_layer)
         for i in range(len(rgetattr(self.model, self.layers_name))):
             rgetattr(self.model, self.layers_name)[i].self_attn.layer_idx = i
-
-        # actually run the forward pass
-        result = self.model(inputs_embeds=h, output_hidden_states=True).hidden_states[self.end_layer-self.start_layer]
-
-        # reset model to un-mutated state
-        self.reset()
-        return result
+        try:
+            return self.model.model(
+                inputs_embeds=h, output_hidden_states=True, use_cache=False,
+            ).hidden_states[self.end_layer-self.start_layer]
+        finally:
+            self.reset()
 
 class DeltaActivations(nn.Module):
     def __init__(self, sliced_model, target_position_indices=slice(-3,None)):
         super().__init__()
         self.sliced_model = sliced_model
         self.device = sliced_model.model.device
+        self.dtype = sliced_model.model.dtype
         self.target_position_indices = target_position_indices
     def forward(self, theta, x, y):
         '''
         computes average delta in target layer activations as a 
         function of bias theta
         '''
+        theta = theta.to(device=self.device, dtype=self.dtype)
+        x = x.to(device=self.device, dtype=self.dtype)
+        y = y.to(device=self.device, dtype=self.dtype)
         delta = self.sliced_model(x+theta) - y # batch_size x seq_len x d_model
         delta = delta[:, self.target_position_indices, :]
         return delta.mean(dim=1)
@@ -95,6 +98,8 @@ class StreamingAverage:
         Returns:
             Current mean after incorporating the new batch
         """
+        # Accumulate in FP32 even when model activations use BF16/FP16.
+        batch = batch.float()
         batch_size = batch.size(0)
         
         if self.mean is None:
@@ -135,9 +140,12 @@ class SteeringCalibrator():
         delta_acts = vmap(delta_acts_single, in_dims=(1,None,None), out_dims=2,
                   chunk_size=factor_batch_size)
         d_model = X.shape[2]
-        V_cal = F.normalize(torch.randn(d_model, calibration_sample_size), dim=0)
+        V_cal = F.normalize(
+            torch.randn(d_model, calibration_sample_size, device=delta_acts_single.device, dtype=delta_acts_single.dtype),
+            dim=0,
+        )
         def jvp_single(v,X,Y):
-            v0 = torch.zeros(v.shape)
+            v0 = torch.zeros_like(v)
             _, jvp_out = jvp(lambda _v: delta_acts_single(_v,X,Y), (v0,), (v,))
             return jvp_out
         jvp_batch = vmap(lambda v, X, Y: jvp_single(v,X,Y), in_dims=(1,None,None), out_dims=(2), chunk_size=factor_batch_size)
@@ -161,11 +169,34 @@ class SteeringCalibrator():
                     y = Y[b:b+batch_size,:,:].to(delta_acts_single.device)
                     delta_acts_batch = delta_acts(r*V_cal, x, y)
                     delta_acts_avg.update(delta_acts_batch)
-            num = (delta_acts_avg.get_mean()-r*U_cal).pow(2).sum(dim=0)
-            return math.sqrt((num / denom).mean())
+            linear = r * U_cal.float()
+            denom = linear.pow(2).sum(dim=0).clamp_min(1e-12)
+            num = (delta_acts_avg.get_mean().float() - linear).pow(2).sum(dim=0)
+            return torch.sqrt((num / denom).mean()).item()
+
+        candidates = torch.logspace(-3, 2, steps=20).tolist()
+        values = [jacobian_ratio(r) - self.target_ratio for r in candidates]
+
+        bracket = next(
+            (
+                (a, b)
+                for a, b, fa, fb in zip(
+                    candidates[:-1], candidates[1:],
+                    values[:-1], values[1:]
+                )
+                if math.isfinite(fa) and math.isfinite(fb) and fa * fb <= 0
+            ),
+            None,
+        )
+
+        if bracket is None:
+            raise ValueError(
+                "No calibration root found in [0.001, 100.0]. "
+                f"Observed ratios: {[round(v + self.target_ratio, 4) for v in values]}"
+            )
 
         # solve for jacobian_ratio = target_ratio
-        soln = root_scalar(lambda r: jacobian_ratio(r)-self.target_ratio, bracket=[.001, 100.0])
+        soln = root_scalar(lambda r: jacobian_ratio(r)-self.target_ratio, bracket=bracket)
         self.R = soln.root
         return self.R
 class LinearDCT():
@@ -184,13 +215,14 @@ class LinearDCT():
             def vjp_single(u,v,X,Y):
                 output, vjp_fn = vjp(lambda _v: delta_acts_single(_v,X,Y), v)
                 with torch.no_grad():
-                    udots = output @ u
-                return udots, output.detach(), vjp_fn(u.expand(X.shape[0], -1))[0].detach()
+                    udots = output.float() @ u.float()
+                cotangent = u.to(output.dtype).expand(X.shape[0], -1)
+                return udots, output.detach().float(), vjp_fn(cotangent)[0].detach().float()
             vjp_batch = vmap(lambda u,v, X, Y: vjp_single(u,v,X,Y), in_dims=(1,1,None,None),
                              out_dims=(1,2,1), chunk_size=factor_batch_size)
         elif method == "full":
-            v0 = torch.zeros(d_model)
             def jvp_single(v,X,Y):
+                v0 = torch.zeros_like(v)
                 with torch.no_grad():
                     output, jvp_out = jvp(lambda _v: delta_acts_single(_v, X, Y), (v0,),(v,))
                 return jvp_out # d_model
@@ -199,14 +231,31 @@ class LinearDCT():
             
         if method=="projected":
             # if projected we will calculate VJPs at random output directions
-            U_rand = F.normalize(torch.randn(d_model, dim_output_projection),dim=0)
+            U_rand = F.normalize(
+                torch.randn(
+                    d_model,
+                    dim_output_projection,
+                    device=delta_acts_single.device,
+                    dtype=delta_acts_single.dtype,
+                ),
+                dim=0,
+            )
         else:
             # otherwise use all output directions in standard basis
             dim_output_projection = d_model
-            V_in = torch.eye(d_model)
+            V_in = torch.eye(
+                d_model,
+                device=delta_acts_single.device,
+                dtype=delta_acts_single.dtype,
+            )
 
         # will calculate jacobian at zero
-        V0 = torch.zeros(d_model, dim_output_projection)
+        V0 = torch.zeros(
+            d_model,
+            dim_output_projection,
+            device=delta_acts_single.device,
+            dtype=delta_acts_single.dtype,
+        )
 
         # loop over data
         print("computing jacobian...")
@@ -249,10 +298,18 @@ class QuadraticDCT():
         self.num_factors=num_factors
         pass
 
-    def _init_rand(self, delta_acts, X, Y):
+    def _init_rand(self, delta_acts, X, Y, batch_size):
         print("initializing V,U...")
         # initialize V randomly
-        self.V = F.normalize(torch.randn(self.d_source, self.num_factors, device=self.device), dim=0)
+        self.V = F.normalize(
+            torch.randn(
+                self.d_source,
+                self.num_factors,
+                device=self.device,
+                dtype=torch.float32,
+            ),
+            dim=0,
+        )
 
         # initialize U as average of delta_acts
         U_avg = StreamingAverage()
@@ -275,7 +332,7 @@ class QuadraticDCT():
         
         
     def fit(self, delta_acts_single, X, Y, batch_size=1, factor_batch_size=16, init="jacobian", d_proj=32,
-            max_iters=20, compute_intermediate_objective=False):
+            max_iters=20):
         assert(init in ["random","jacobian"])
         self.num_samples, self.seq_len, self.d_source = X.shape
         self.batch_size = batch_size
@@ -287,16 +344,16 @@ class QuadraticDCT():
                   chunk_size=factor_batch_size)
         # init
         if init == "random":
-            self._init_rand(delta_acts,X,Y)
+            self._init_rand(delta_acts,X,Y,batch_size)
         elif init == "jacobian":
             self._init_jacobian(delta_acts_single,X,Y)
 
         # define autograd functions
         # u'Jv
         def ujv_fn(u,v,X,Y):
-            v0 = torch.zeros(self.d_source)
+            v0 = torch.zeros_like(v)
             _, jvp_out = jvp(lambda _v: delta_acts_single(_v, X, Y), (v0,), (v,))
-            return (jvp_out @ u).mean()
+            return (jvp_out.float() @ u.float()).mean()
         # H(u,v,:)
         def huv_single(u,v,X,Y):
             return grad(lambda v: ujv_fn(u,v,X,Y))(v).detach()
@@ -306,7 +363,7 @@ class QuadraticDCT():
             return hfunc(U,V)
         # Jv
         def jv1(v, X, Y):
-            v0 = torch.zeros(self.d_source)
+            v0 = torch.zeros_like(v)
             return jvp(lambda v_: delta_acts_single(v_,X,Y), (v0,),(v,))[1]
         # H(:,v,v)
         def hvv(v1,v2,X,Y):
@@ -358,8 +415,24 @@ class ExponentialDCT():
     def _init_rand(self, delta_acts, X, Y):
         print("initializing V,U...")
         # initialize V randomly
-        self.V = F.normalize(torch.randn(self.d_source, self.num_factors, device=self.device), dim=0)
-        self.U = F.normalize(torch.randn(self.d_target, self.num_factors, device=self.device), dim=0)
+        self.V = F.normalize(
+            torch.randn(
+                self.d_source,
+                self.num_factors,
+                device=self.device,
+                dtype=torch.float32,
+            ),
+            dim=0,
+        )
+        self.U = F.normalize(
+            torch.randn(
+                self.d_target,
+                self.num_factors,
+                device=self.device,
+                dtype=torch.float32,
+            ),
+            dim=0,
+        )
         pass
 
     def _init_jacobian(self, delta_acts_single, X, Y):
@@ -376,8 +449,8 @@ class ExponentialDCT():
         Delta_avg = StreamingAverage()
         with torch.no_grad():
             for b in tqdm(range(0, num_samples, batch_size)):
-                x = X[b:b+self.batch_size,:,:].to(self.device)
-                y = Y[b:b+self.batch_size,:,:].to(self.device)
+                x = X[b:b+batch_size,:,:].to(self.device)
+                y = Y[b:b+batch_size,:,:].to(self.device)
                 Delta_batch = delta_acts(self.input_scale * self.V, x, y)              
                 Delta_avg.update(Delta_batch)
             if target_vec is None:
@@ -387,11 +460,12 @@ class ExponentialDCT():
                 self.scores = self.alphas.pow(2)
                 self.scores, self.indices = torch.sort(self.scores, descending=True)
             else:
-                self.scores = Delta_avg.get_mean().t() @ target_vec.to(self.device)
+                avg = Delta_avg.get_mean().T
+                self.scores = avg @ target_vec.to(device=self.device, dtype=avg.dtype)
                 self.scores, self.indices = torch.sort(self.scores, descending=True)                
         return self.scores, self.indices
         
-    def fit(self, delta_acts_single, X, Y, batch_size=1, factor_batch_size=16, init="random", d_proj=32,
+    def fit(self, delta_acts_single: DeltaActivations, X, Y, batch_size=1, factor_batch_size=16, init="random", d_proj=32,
             input_scale=1.0, max_iters=10, beta=1.0):
         '''Fit DCT
 
@@ -443,8 +517,9 @@ class ExponentialDCT():
         def vjp_single(u,v,X,Y):
             output, vjp_fn = vjp(lambda _v: delta_acts_single(_v,X,Y), v)
             with torch.no_grad():
-                udots = output @ u
-            return udots, output.detach(), vjp_fn(u.expand(X.shape[0], -1))[0].detach()
+                udots = output.float() @ u.float()
+            cotangent = u.to(output.dtype).expand(X.shape[0], -1)
+            return udots, output.detach().float(), vjp_fn(cotangent)[0].detach().float()
         vjp_batch = vmap(lambda u,v, X, Y: vjp_single(u,v,X,Y), in_dims=(1,1,None,None),
                          out_dims=(1,2,1), chunk_size=self.factor_batch_size)
 
@@ -477,7 +552,7 @@ class ExponentialDCT():
             fdots.append(fdot_all)
             G_U = G_U_avg.get_mean()
             G_V = G_V_avg.get_mean()
-        
+            
             # update
             with torch.no_grad():
                 self.U.data = F.normalize(self.beta*G_U+(1-self.beta)*self.U.data, dim=0)
@@ -537,7 +612,9 @@ class ModelEditor():
 
         # set bias to vec
         module_obj = rgetattr(self.layers[layer_idx], module_name)
-        module_obj.bias = nn.Parameter(vec.to(module_obj.weight.device))
+        module_obj.bias = nn.Parameter(
+            vec.to(device=module_obj.weight.device, dtype=module_obj.weight.dtype)
+        )
         pass
 
     def ablate(self, vec, layer_idxs=None, modules=["mlp.out","attn.out"]):
@@ -547,11 +624,14 @@ class ModelEditor():
         for i in layer_idxs:
             for module in modules:
                 if (i, module) in self.ablated_modules:
-                    raise Error("multiple ablations not yet supported")
+                    raise ValueError("multiple ablations not yet supported")
                 module_obj = rgetattr(self.layers[i], self.module_names[module])
                 with torch.no_grad():
                     # ablate weight matrix
-                    vec = vec.to(module_obj.weight.device)
+                    vec = vec.to(
+                        device=module_obj.weight.device,
+                        dtype=module_obj.weight.dtype,
+                    )
                     left_mult = vec.t() @ module_obj.weight.data
                     module_obj.weight.data -= torch.einsum("i,j->ij", vec, left_mult)
                     # store vec, left_mult to allow restoring the weight matrix
