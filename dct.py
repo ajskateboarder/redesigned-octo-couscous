@@ -18,11 +18,13 @@ def rhasattr(obj, path):
         return False
 
 class SlicedModel(nn.Module):
-    def __init__(self, model, start_layer, end_layer, layers_name=None):
+    def __init__(self, model, start_layer, end_layer, layers_name=None,
+                 apply_final_norm=False):
         super().__init__()
         self.model = model
         self.start_layer = start_layer
         self.end_layer = end_layer
+        self.apply_final_norm = apply_final_norm
         if layers_name is None:
             if hasattr(self.model, "layers"):  
                 self.layers_name = "model.layers"
@@ -39,24 +41,26 @@ class SlicedModel(nn.Module):
         setattr(rgetattr(self.model, ".".join(self.layers_name_split[:-1])), self.layers_name_split[-1], self.L)
         for i in range(len(rgetattr(self.model, self.layers_name))):
             rgetattr(self.model, self.layers_name)[i].self_attn.layer_idx = i
-        pass
-
 
     def forward(self, h):
         # mutate model so that forward pass only runs the specified middle layers
         h = h.to(device=self.model.device, dtype=self.model.dtype)
         self.L = self.layers
         self.depth = self.model.config.num_hidden_layers
+        final_norm = self.model.model.norm
         layers_name_split = self.layers_name_split
-        setattr(rgetattr(self.model, ".".join(layers_name_split[:-1])), layers_name_split[-1], self.L[self.start_layer:self.end_layer+1])
+        setattr(rgetattr(self.model, ".".join(layers_name_split[:-1])), layers_name_split[-1], self.L[self.start_layer:self.end_layer])
         setattr(self.model.config, "num_hidden_layers",self.end_layer-self.start_layer)
+        if not self.apply_final_norm:
+            self.model.model.norm = nn.Identity()
         for i in range(len(rgetattr(self.model, self.layers_name))):
             rgetattr(self.model, self.layers_name)[i].self_attn.layer_idx = i
         try:
             return self.model.model(
-                inputs_embeds=h, output_hidden_states=True, use_cache=False,
-            ).hidden_states[self.end_layer-self.start_layer]
+                inputs_embeds=h, use_cache=False,
+            ).last_hidden_state
         finally:
+            self.model.model.norm = final_norm
             self.reset()
 
 class DeltaActivations(nn.Module):
@@ -152,7 +156,7 @@ class SteeringCalibrator():
 
         U_cal_avg = StreamingAverage()
         with torch.no_grad():
-            for b in range(0, X.shape[0], batch_size):
+            for b in tqdm(range(0, X.shape[0], batch_size)):
                 x = X[b:b+batch_size,:,:].to(delta_acts_single.device)
                 y = Y[b:b+batch_size,:,:].to(delta_acts_single.device)
                 U_cal_batch = jvp_batch(V_cal, x, y)
@@ -164,7 +168,7 @@ class SteeringCalibrator():
             denom = (r*U_cal_norms).pow(2)
             delta_acts_avg = StreamingAverage()
             with torch.no_grad():
-                for b in range(0,X.shape[0],batch_size):
+                for b in tqdm(range(0,X.shape[0],batch_size)):
                     x = X[b:b+batch_size,:,:].to(delta_acts_single.device)
                     y = Y[b:b+batch_size,:,:].to(delta_acts_single.device)
                     delta_acts_batch = delta_acts(r*V_cal, x, y)
@@ -184,7 +188,7 @@ class SteeringCalibrator():
                     candidates[:-1], candidates[1:],
                     values[:-1], values[1:]
                 )
-                if math.isfinite(fa) and math.isfinite(fb) and fa * fb <= 0
+                if math.isfinite(fa) and math.isfinite(fb) and fa <= 0 <= fb
             ),
             None,
         )
@@ -276,8 +280,8 @@ class LinearDCT():
 
         # compute SVD to get factorization of Jacobian
         print("computing SVD of jacobian...")
-        self.U, _, self.V = torch.linalg.svd(J)
-        self.V = self.V[:,:self.num_factors]
+        self.U, _, Vh = torch.linalg.svd(J, full_matrices=False)
+        self.V = Vh.T[:, :self.num_factors]
 
         # if method=="projected" then we need an extra forward pass to get output directions in full space
         if method=="projected":
@@ -451,7 +455,7 @@ class ExponentialDCT():
             for b in tqdm(range(0, num_samples, batch_size)):
                 x = X[b:b+batch_size,:,:].to(self.device)
                 y = Y[b:b+batch_size,:,:].to(self.device)
-                Delta_batch = delta_acts(self.input_scale * self.V, x, y)              
+                Delta_batch = delta_acts(self.input_scale * self.V, x, y)
                 Delta_avg.update(Delta_batch)
             if target_vec is None:
                 self.alphas = (Delta_avg.get_mean() * self.U).sum(dim=0)
@@ -607,7 +611,9 @@ class ModelEditor():
         if (layer_idx, module_name) not in self.steered_layers:
             bias = rgetattr(self.layers[layer_idx], module_name).bias
             if bias is not None:
-                bias = bias.clone()
+                bias = nn.Parameter(
+                    bias.detach().clone(), requires_grad=bias.requires_grad
+                )
             self.steered_layers[(layer_idx, module_name)] = bias
 
         # set bias to vec
