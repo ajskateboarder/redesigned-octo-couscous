@@ -5,3 +5,7 @@ exponential dcts aren't like this with many features connected within similar ra
 when working with early layers or over a short range, exp dcts tend to produce connections of $U_i \leftarrow V_i$. this effect seems to attenuate with more depth (n=2)
 
 one-to-many feature maps are possible in $U \rightarrow V$ according to feature pullbacks. deembeddings are not meaningful
+
+... istfg i lost the code that showed that "taking the pullback of an output factor, and mean-ablating a combination of top activating input factors" gave you something circuit-like
+
+this entire time i was misunderstanding what DCT ranking was doing, because the codebase doesnt rank output factors! $V$ is the set of input factors! this is annoying

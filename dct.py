@@ -168,7 +168,7 @@ class SteeringCalibrator():
             denom = (r*U_cal_norms).pow(2)
             delta_acts_avg = StreamingAverage()
             with torch.no_grad():
-                for b in tqdm(range(0,X.shape[0],batch_size)):
+                for b in range(0,X.shape[0],batch_size):
                     x = X[b:b+batch_size,:,:].to(delta_acts_single.device)
                     y = Y[b:b+batch_size,:,:].to(delta_acts_single.device)
                     delta_acts_batch = delta_acts(r*V_cal, x, y)
@@ -179,7 +179,7 @@ class SteeringCalibrator():
             return torch.sqrt((num / denom).mean()).item()
 
         candidates = torch.logspace(-3, 2, steps=20).tolist()
-        values = [jacobian_ratio(r) - self.target_ratio for r in candidates]
+        values = [jacobian_ratio(r) - self.target_ratio for r in tqdm(candidates)]
 
         bracket = next(
             (
