@@ -13,7 +13,7 @@ def _streamed_combinations(x, r, batch_size=100000):
         for i in range(0, n, batch_size): yield x[i:i+batch_size].unsqueeze(-1)
         return
     if r == 2:
-        p = torch.triu_indices(n, n, 1, dtype=dt, device=dev).t()
+        p = torch.triu_indices(n, n, 1, dtype=torch.long, device=dev).t()
         for i in range(0, len(p), batch_size): yield x[p[i:i+batch_size].long()]
         return
     
