@@ -3,3 +3,4 @@ env/
 harmful_behaviors.csv
 log/
 .venv/
+*.pt
