@@ -1,6 +1,13 @@
 __pycache__/
 env/
-harmful_behaviors.csv
+*.csv
 log/
 .venv/
 *.pt
+profile.py
+.python-version
+crosscoder-rep/
+crosscoder-rep/.cache/
+crosscoder-rep/.checkpoints/
+crosscoder-rep/wandb/
+e2e-sae-rep/

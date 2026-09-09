@@ -3,7 +3,7 @@ from torch import nn, vmap
 import torch
 from torch.func import vjp, jvp, grad
 from torch.nn import functional as F
-from tqdm import tqdm
+from tqdm.auto import tqdm
 import math
 from scipy.optimize import root_scalar
 
@@ -30,37 +30,45 @@ class SlicedModel(nn.Module):
                 self.layers_name = "model.layers"
             elif hasattr(self.model, "model"): 
                 self.layers_name =  "model.model.layers"
+            elif hasattr(self.model, "transformer"):
+                self.layers_name = "transformer.h"
             else:
                 raise ValueError(f"don't know how to get layer list for {type(model)}")
         else:
             self.layers_name = layers_name
         self.layers = rgetattr(self.model, self.layers_name)
         self.layers_name_split = self.layers_name.split(".")
+        self.backbone = rgetattr(self.model, ".".join(self.layers_name_split[:-1]))
+        self.final_norm_name = "norm" if hasattr(self.backbone, "norm") else "ln_f"
     def reset(self):
         setattr(self.model.config, "num_hidden_layers",self.depth)
-        setattr(rgetattr(self.model, ".".join(self.layers_name_split[:-1])), self.layers_name_split[-1], self.L)
+        setattr(self.backbone, self.layers_name_split[-1], self.L)
         for i in range(len(rgetattr(self.model, self.layers_name))):
-            rgetattr(self.model, self.layers_name)[i].self_attn.layer_idx = i
+            layer = rgetattr(self.model, self.layers_name)[i]
+            if hasattr(layer, "self_attn"):
+                layer.self_attn.layer_idx = i
 
     def forward(self, h):
         # mutate model so that forward pass only runs the specified middle layers
         h = h.to(device=self.model.device, dtype=self.model.dtype)
         self.L = self.layers
         self.depth = self.model.config.num_hidden_layers
-        final_norm = self.model.model.norm
+        final_norm = getattr(self.backbone, self.final_norm_name)
         layers_name_split = self.layers_name_split
-        setattr(rgetattr(self.model, ".".join(layers_name_split[:-1])), layers_name_split[-1], self.L[self.start_layer:self.end_layer])
+        setattr(self.backbone, layers_name_split[-1], self.L[self.start_layer:self.end_layer])
         setattr(self.model.config, "num_hidden_layers",self.end_layer-self.start_layer)
         if not self.apply_final_norm:
-            self.model.model.norm = nn.Identity()
+            setattr(self.backbone, self.final_norm_name, nn.Identity())
         for i in range(len(rgetattr(self.model, self.layers_name))):
-            rgetattr(self.model, self.layers_name)[i].self_attn.layer_idx = i
+            layer = rgetattr(self.model, self.layers_name)[i]
+            if hasattr(layer, "self_attn"):
+                layer.self_attn.layer_idx = i
         try:
-            return self.model.model(
+            return self.backbone(
                 inputs_embeds=h, use_cache=False,
             ).last_hidden_state
         finally:
-            self.model.model.norm = final_norm
+            setattr(self.backbone, self.final_norm_name, final_norm)
             self.reset()
 
 class DeltaActivations(nn.Module):
@@ -577,6 +585,8 @@ class ModelEditor():
                 self.layers_name = "model.layers"
             elif hasattr(self.model, "model"):  # mistral-like
                 self.layers_name =  "model.model.layers"
+            elif hasattr(self.model, "transformer"):
+                self.layers_name = "transformer.h"
             else:
                 raise ValueError(f"don't know how to get layer list for {type(model)}")
         else:
@@ -584,14 +594,18 @@ class ModelEditor():
         self.layers = rgetattr(self.model, self.layers_name)
         pass
         if mlp_out_name is None:
-            if rhasattr(self.layers[0], "mlp.down_proj"):
+            if rhasattr(self.layers[0], "mlp.c_proj"):
+                self.mlp_out_name = "mlp.c_proj"
+            elif rhasattr(self.layers[0], "mlp.down_proj"):
                 self.mlp_out_name = "mlp.down_proj"
             else:
                 raise ValueError(f"don't know how to get mlp out")
         else:
             self.mlp_out_name = mlp_out_name
         if attn_out_name is None:
-            if rhasattr(self.layers[0], "self_attn.o_proj"):
+            if rhasattr(self.layers[0], "attn.c_proj"):
+                self.attn_out_name = "attn.c_proj"
+            elif rhasattr(self.layers[0], "self_attn.o_proj"):
                 self.attn_out_name = "self_attn.o_proj"
             else:
                 raise ValueError(f"don't know how to get attn out")
