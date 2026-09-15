@@ -91,124 +91,19 @@ class DCTAttrib:
 
         return torch.sum(vmap(_I_single_edge)(p))
 
-    def I_vectors(self, j: int, vector_sets: Float[Tensor, "... width features"], input_scale: float = 1):
-        if vector_sets.ndim not in (2, 3):
-            raise ValueError("vector_sets must have shape (width, features) or (batch, width, features)")
-        if vector_sets.shape[-1] != self.d:
-            raise ValueError(
-                f"vector dimension {vector_sets.shape[-1]} does not match V dimension {self.d}"
-            )
+    def _many_to_one(self, j: int, S: Int[Tensor, "indices"], c: float = 1):
+        responses = self.U @ torch.expm1(c * self.V_dot)
+        target = responses[:, j]
+        target = target / target.norm().clamp_min(1e-12)
+        source_responses = responses[:, S.long()]
+        source_responses = source_responses / source_responses.norm(dim=0, keepdim=True).clamp_min(1e-12)
+        return (target @ source_responses).sum()
 
-        squeeze_result = vector_sets.ndim == 2
-        if squeeze_result:
-            vector_sets = vector_sets.unsqueeze(0)
-
-        vector_sets = vector_sets.to(device=self.V.device, dtype=self.V.dtype)
-        edge_terms = torch.expm1(input_scale * (vector_sets @ self.V)).prod(dim=1)
-        scores = edge_terms @ self.U_dot[:, j]
-        return scores.squeeze(0) if squeeze_result else scores
-
-    def permutation_z_score(
-        self,
-        j: int,
-        S: Float[Tensor, "width features"],
-        null_vectors: Float[Tensor, "pool features"],
-        num_permutations: int = 1000,
-        input_scale: float = 1,
-        batch_size: int = 256,
-        seed: Optional[int] = None,
-    ):
-        return self.combination_z_score(
-            j,
-            S,
-            null_vectors,
-            num_combinations=num_permutations,
-            input_scale=input_scale,
-            batch_size=batch_size,
-            seed=seed,
-        )
-
-    def combination_z_score(
-        self,
-        j: int,
-        S: Float[Tensor, "width features"],
-        null_vectors: Float[Tensor, "pool features"],
-        num_combinations: int = 100000,
-        input_scale: float = 1,
-        batch_size: int = 256,
-        seed: Optional[int] = None,
-    ):
-        if S.ndim != 2 or null_vectors.ndim != 2:
-            raise ValueError("S and null_vectors must both be two-dimensional")
-        if S.shape[1] != null_vectors.shape[1]:
-            raise ValueError(
-                f"S dimension {S.shape[1]} does not match null vector dimension {null_vectors.shape[1]}"
-            )
-        if S.shape[0] > null_vectors.shape[0]:
-            raise ValueError("the null pool must contain at least as many vectors as S")
-        if num_combinations < 2:
-            raise ValueError("num_combinations must be at least 2")
-        if batch_size < 1:
-            raise ValueError("batch_size must be positive")
-
-        generator = torch.Generator(device="cpu")
-        if seed is not None:
-            generator.manual_seed(seed)
-
-        pool_size = null_vectors.shape[0]
-        width = S.shape[0]
-        total_combinations = math.comb(pool_size, width)
-        num_combinations = min(num_combinations, total_combinations)
-        null_scores = []
-        if num_combinations == total_combinations:
-            indices = torch.arange(pool_size, dtype=torch.long)
-            combination_batches = _streamed_combinations(indices, width, batch_size)
-        else:
-            def sampled_combination_batches():
-                for start in range(0, num_combinations, batch_size):
-                    count = min(batch_size, num_combinations - start)
-                    batch = torch.empty((0, width), dtype=torch.long)
-                    while batch.shape[0] < count:
-                        candidates = torch.randint(
-                            pool_size,
-                            (count - batch.shape[0], width),
-                            generator=generator,
-                        ).sort(dim=1).values
-                        candidates = candidates[
-                            torch.all(candidates[:, 1:] != candidates[:, :-1], dim=1)
-                        ]
-                        batch = torch.cat((batch, candidates))
-                    yield batch
-
-            combination_batches = sampled_combination_batches()
-
-        for indices in combination_batches:
-            indices = indices.to(null_vectors.device)
-            scores = self.I_vectors(j, null_vectors[indices], input_scale)
-            null_scores.append(scores.detach().float().cpu())
-
-        observed = self.I_vectors(j, S, input_scale).detach().float().cpu()
-        null_scores = torch.cat(null_scores)
-        print(observed.max())
-        print(null_scores.max())
-        null_mean = null_scores.mean()
-        null_std = null_scores.std(correction=0)
-        if null_std == 0:
-            raise ValueError("the permutation null has zero standard deviation")
-
-        return {
-            "z_score": (observed - null_mean) / null_std,
-            "observed": observed,
-            "null_mean": null_mean,
-            "null_std": null_std,
-            "null_mean_se": null_std / math.sqrt(num_combinations),
-            "empirical_p_two_sided": (
-                (null_scores.sub(null_mean).abs() >= observed.sub(null_mean).abs()).sum() + 1
-            ) / (num_combinations + 1),
-            "num_combinations": num_combinations,
-            "total_combinations": total_combinations,
-            "null_scores": null_scores,
-        }
+    def _interaction_to_one(self, j: int, S: Int[Tensor, "indices"], c: float = 1):
+        expm = torch.expm1(c * self.V_dot)
+        target = self.U @ expm[:, j]
+        interaction = self.U @ torch.prod(expm[:, S.long()], dim=1)
+        return (target @ interaction) / (target.norm() * interaction.norm()).clamp_min(1e-12)
 
     def I(self, j: int, width: int, batch_size: int, k: int, input_scale: int = 1, silent=False):
         device = self.device
@@ -226,6 +121,101 @@ class DCTAttrib:
                     top_k.update(batch, g)
                     bottom_k.update(batch, g)
                     pbar.update(batch.shape[0])
+        finally:
+            gc.collect()
+            torch.cuda.empty_cache()
+
+        return top_k, bottom_k
+
+    def many_to_one(self, j: int, width: int, batch_size: int, k: int,
+                    input_scale: float = 1, silent=False):
+        """Find source-factor sets whose singleton responses converge on factor j's response mode."""
+        if not 0 <= j < self.V.shape[1]:
+            raise ValueError("j is outside the factor dictionary")
+        candidates = torch.arange(self.V.shape[1], device=self.device, dtype=torch.int64)
+        candidates = candidates[candidates != j]
+        if not 1 <= width <= len(candidates):
+            raise ValueError("width must select at least one non-target factor")
+
+        responses = self.U @ torch.expm1(input_scale * self.V_dot)
+        responses = responses / responses.norm(dim=0, keepdim=True).clamp_min(1e-12)
+        affinities = responses[:, j] @ responses
+
+        try:
+            top_k = StreamedTopK(top_k=k)
+            bottom_k = StreamedTopK(top_k=k, mode="bottom")
+            combinations = _streamed_combinations(candidates, width, batch_size)
+            total = math.comb(len(candidates), width)
+            with tqdm(total=total, disable=silent) as pbar:
+                for batch in combinations:
+                    scores = affinities[batch.long()].sum(dim=1).detach().cpu()
+                    batch = batch.cpu()
+                    top_k.update(batch, scores)
+                    bottom_k.update(batch, scores)
+                    pbar.update(len(batch))
+        finally:
+            gc.collect()
+            torch.cuda.empty_cache()
+
+        return top_k, bottom_k
+
+    def aligned_connection(self, j: int, k: int, alignment_weight: float = .2,
+                           input_scale: float = 1):
+        """Rank singleton edges by strength with a bounded response-alignment bonus."""
+        if not 0 <= j < self.V.shape[1]:
+            raise ValueError("j is outside the factor dictionary")
+        if alignment_weight < 0:
+            raise ValueError("alignment_weight must be non-negative")
+
+        candidates = torch.arange(self.V.shape[1], device=self.device, dtype=torch.int64)
+        candidates = candidates[candidates != j]
+        responses = self.U @ torch.expm1(input_scale * self.V_dot)
+        strengths = self.U[:, j] @ responses[:, candidates]
+        unit_responses = responses / responses.norm(dim=0, keepdim=True).clamp_min(1e-12)
+        alignments = unit_responses[:, j] @ unit_responses[:, candidates]
+
+        strength_ranks = torch.argsort(torch.argsort(strengths, stable=True), stable=True)
+        alignment_ranks = torch.argsort(torch.argsort(alignments, stable=True), stable=True)
+        denominator = max(1, len(candidates) - 1)
+        scores = (strength_ranks + alignment_weight * alignment_ranks) / denominator
+
+        top_k = StreamedTopK(top_k=k)
+        bottom_k = StreamedTopK(top_k=k, mode="bottom")
+        singleton_candidates = candidates.unsqueeze(1).cpu()
+        scores = scores.detach().cpu()
+        top_k.update(singleton_candidates, scores)
+        bottom_k.update(singleton_candidates, scores)
+        return top_k, bottom_k
+
+    def interaction_to_one(self, j: int, width: int, batch_size: int, k: int,
+                           input_scale: float = 1, silent=False):
+        """Rank frozen-surrogate source interactions by alignment with factor j's response mode."""
+        if not 0 <= j < self.V.shape[1]:
+            raise ValueError("j is outside the factor dictionary")
+        candidates = torch.arange(self.V.shape[1], device=self.device, dtype=torch.int64)
+        candidates = candidates[candidates != j]
+        if not 2 <= width <= len(candidates):
+            raise ValueError("width must select at least two non-target factors")
+
+        expm = torch.expm1(input_scale * self.V_dot)
+        target = self.U @ expm[:, j]
+        target = target / target.norm().clamp_min(1e-12)
+
+        try:
+            top_k = StreamedTopK(top_k=k)
+            bottom_k = StreamedTopK(top_k=k, mode="bottom")
+            combinations = _streamed_combinations(candidates, width, batch_size)
+            total = math.comb(len(candidates), width)
+            with tqdm(total=total, disable=silent) as pbar:
+                for batch in combinations:
+                    atom_coefficients = torch.prod(expm[:, batch.long()], dim=2)
+                    interactions = self.U @ atom_coefficients
+                    interactions /= interactions.norm(dim=0, keepdim=True).clamp_min(1e-12)
+                    scores = (target @ interactions).detach().cpu()
+                    batch = batch.cpu()
+                    top_k.update(batch, scores)
+                    bottom_k.update(batch, scores)
+                    pbar.update(len(batch))
         finally:
             gc.collect()
             torch.cuda.empty_cache()

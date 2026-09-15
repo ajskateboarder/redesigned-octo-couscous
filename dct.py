@@ -8,6 +8,44 @@ import math
 from scipy.optimize import root_scalar
 
 
+def directional_hessian_output(function, first, second, X, Y):
+    """Return the context-mean output Hessian contraction H[:, first, second] at zero."""
+    zero = torch.zeros_like(first)
+
+    def first_direction_at(base):
+        return jvp(lambda theta: function(theta, X, Y), (base,), (first,))[1]
+
+    return jvp(first_direction_at, (zero,), (second,))[1].mean(dim=0)
+
+
+def directional_hessian_pullback(function, output_direction, source_direction, X, Y):
+    """Return H[output_direction, source_direction, :] at zero."""
+    zero = torch.zeros_like(source_direction)
+
+    def projected_directional_derivative(base):
+        directional = jvp(
+            lambda theta: function(theta, X, Y), (base,), (source_direction,)
+        )[1]
+        return (directional.float() @ output_direction.float()).mean()
+
+    return grad(projected_directional_derivative)(zero)
+
+
+def crossing_bracket(candidates, values):
+    """Find adjacent finite values that bracket zero in either direction."""
+    return next(
+        (
+            (left, right)
+            for left, right, left_value, right_value in zip(
+                candidates[:-1], candidates[1:], values[:-1], values[1:]
+            )
+            if math.isfinite(left_value) and math.isfinite(right_value)
+            and left_value * right_value <= 0
+        ),
+        None,
+    )
+
+
 def rgetattr(obj, path):
     return functools.reduce(getattr, path.split("."), obj)
 def rhasattr(obj, path):
@@ -189,17 +227,7 @@ class SteeringCalibrator():
         candidates = torch.logspace(-3, 2, steps=20).tolist()
         values = [jacobian_ratio(r) - self.target_ratio for r in tqdm(candidates)]
 
-        bracket = next(
-            (
-                (a, b)
-                for a, b, fa, fb in zip(
-                    candidates[:-1], candidates[1:],
-                    values[:-1], values[1:]
-                )
-                if math.isfinite(fa) and math.isfinite(fb) and fa <= 0 <= fb
-            ),
-            None,
-        )
+        bracket = crossing_bracket(candidates, values)
 
         if bracket is None:
             raise ValueError(
@@ -361,25 +389,16 @@ class QuadraticDCT():
             self._init_jacobian(delta_acts_single,X,Y)
 
         # define autograd functions
-        # u'Jv
-        def ujv_fn(u,v,X,Y):
-            v0 = torch.zeros_like(v)
-            _, jvp_out = jvp(lambda _v: delta_acts_single(_v, X, Y), (v0,), (v,))
-            return (jvp_out.float() @ u.float()).mean()
         # H(u,v,:)
         def huv_single(u,v,X,Y):
-            return grad(lambda v: ujv_fn(u,v,X,Y))(v).detach()
+            return directional_hessian_pullback(delta_acts_single, u, v, X, Y).detach()
         def huv_batch(U,V,X,Y):
             hfunc = vmap(lambda u,v: huv_single(u,v,X,Y), chunk_size=self.factor_batch_size,
                      in_dims=(1,1), out_dims=1)
             return hfunc(U,V)
-        # Jv
-        def jv1(v, X, Y):
-            v0 = torch.zeros_like(v)
-            return jvp(lambda v_: delta_acts_single(v_,X,Y), (v0,),(v,))[1]
         # H(:,v,v)
         def hvv(v1,v2,X,Y):
-            return jvp(lambda _v: jv1(_v,X,Y),(v1,),(v2,))[1].detach().mean(0)
+            return directional_hessian_output(delta_acts_single, v1, v2, X, Y).detach()
         def hvv_batch(V1,V2,X,Y):
             hfunc = vmap(lambda _v1,_v2: hvv(_v1,_v2,X,Y), chunk_size=self.factor_batch_size,
                          in_dims=(1,1), out_dims=1)
@@ -404,7 +423,7 @@ class QuadraticDCT():
                 y = Y[b:b+self.batch_size,:,:].to(self.device)
                 nb = x.shape[0]
                 gvb = huv_batch(self.U,self.V,x,y)
-                gub = hvv_batch(self.U,self.V,x,y)
+                gub = hvv_batch(self.V,self.V,x,y)
                 with torch.no_grad():
                     fb = torch.einsum("if,if->", gub, self.U)
                     G_U_avg.update(gub.unsqueeze(0).expand(nb,-1,-1))
@@ -419,7 +438,108 @@ class QuadraticDCT():
                 self.V.data = F.normalize(G_V, dim=0)
                 fdots.append(fdot_avg.get_mean()[0].item())
         self.objective_values = fdots
+        amplitudes = torch.zeros(self.num_factors, device=self.device)
+        context_count = 0
+        for start in range(0, self.num_samples, self.batch_size):
+            x_batch = X[start:start + self.batch_size].to(self.device)
+            y_batch = Y[start:start + self.batch_size].to(self.device)
+            for context in range(len(x_batch)):
+                for factor in range(self.num_factors):
+                    interaction = directional_hessian_output(
+                        delta_acts_single, self.V[:, factor], self.V[:, factor],
+                        x_batch[context:context + 1], y_batch[context:context + 1],
+                    )
+                    amplitudes[factor] += self.U[:, factor].float() @ interaction.float()
+                context_count += 1
+        self.amplitudes = amplitudes / context_count
         return self.U, self.V
+
+
+class ContextualQuadraticDCT():
+    """Recover asymmetric pair modes by maximizing context-mean squared Hessian projection."""
+
+    def __init__(self, num_factors=512):
+        self.num_factors = num_factors
+
+    def fit(self, delta_acts_single, X, Y, batch_size=1, factor_batch_size=16,
+            max_iters=20, beta=1.0):
+        self.num_samples, _, self.d_source = X.shape
+        _, _, self.d_target = Y.shape
+        self.device = delta_acts_single.device
+        self.batch_size = batch_size
+        self.factor_batch_size = factor_batch_size
+        self.max_iters = max_iters
+        self.beta = beta
+        self.L = F.normalize(torch.randn(self.d_source, self.num_factors,
+                                         device=self.device, dtype=torch.float32), dim=0)
+        self.R = F.normalize(torch.randn(self.d_source, self.num_factors,
+                                         device=self.device, dtype=torch.float32), dim=0)
+        self.U = F.normalize(torch.randn(self.d_target, self.num_factors,
+                                         device=self.device, dtype=torch.float32), dim=0)
+        self.objective_values = []
+
+        def context_score(u, left, right, x, y):
+            interaction = directional_hessian_output(delta_acts_single, left, right, x, y)
+            return u.float() @ interaction.float()
+
+        def gradients(u, left, right, x, y):
+            score = context_score(u, left, right, x, y)
+
+            def objective(current_u, current_left, current_right):
+                current_score = context_score(current_u, current_left, current_right, x, y)
+                return .5 * current_score.square()
+
+            return score.detach(), grad(objective, argnums=(0, 1, 2))(u, left, right)
+
+        batched_gradients = vmap(
+            gradients, in_dims=(1, 1, 1, None, None), out_dims=(0, (1, 1, 1)),
+            chunk_size=self.factor_batch_size,
+        )
+
+        for _ in tqdm(range(max_iters)):
+            with torch.no_grad():
+                self.L, _ = torch.linalg.qr(self.L)
+                self.R, _ = torch.linalg.qr(self.R)
+            score_energy = torch.zeros(self.num_factors, device=self.device)
+            U_update = torch.zeros_like(self.U)
+            L_update = torch.zeros_like(self.L)
+            R_update = torch.zeros_like(self.R)
+            context_count = 0
+            for start in range(0, self.num_samples, batch_size):
+                x_batch = X[start:start + batch_size].to(self.device)
+                y_batch = Y[start:start + batch_size].to(self.device)
+                for context in range(len(x_batch)):
+                    scores, updates = batched_gradients(
+                        self.U, self.L, self.R,
+                        x_batch[context:context + 1], y_batch[context:context + 1],
+                    )
+                    update_u, update_left, update_right = updates
+                    with torch.no_grad():
+                        score_energy += scores.square()
+                        U_update += update_u
+                        L_update += update_left
+                        R_update += update_right
+                    context_count += 1
+            with torch.no_grad():
+                U_update /= context_count
+                L_update /= context_count
+                R_update /= context_count
+                self.U = F.normalize(beta * U_update + (1 - beta) * self.U, dim=0)
+                self.L = F.normalize(beta * L_update + (1 - beta) * self.L, dim=0)
+                self.R = F.normalize(beta * R_update + (1 - beta) * self.R, dim=0)
+                self.objective_values.append(float((score_energy / context_count).sum()))
+        scores = []
+        for context in range(self.num_samples):
+            x = X[context:context + 1].to(self.device)
+            y = Y[context:context + 1].to(self.device)
+            scores.append(torch.stack([
+                context_score(self.U[:, factor], self.L[:, factor], self.R[:, factor], x, y)
+                for factor in range(self.num_factors)
+            ]))
+        self.context_scores = torch.stack(scores).detach()
+        self.amplitudes = self.context_scores.square().mean(dim=0).sqrt()
+        self.signed_amplitudes = self.context_scores.mean(dim=0)
+        return self.U, self.L, self.R
 
 class ExponentialDCT():
     def __init__(self, num_factors=512):
