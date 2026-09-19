@@ -455,9 +455,7 @@ class QuadraticDCT():
         return self.U, self.V
 
 
-class ContextualQuadraticDCT():
-    """Recover asymmetric pair modes by maximizing context-mean squared Hessian projection."""
-
+class AsymmetricQuadraticDCT():
     def __init__(self, num_factors=512):
         self.num_factors = num_factors
 
@@ -484,7 +482,6 @@ class ContextualQuadraticDCT():
 
         def gradients(u, left, right, x, y):
             score = context_score(u, left, right, x, y)
-
             def objective(current_u, current_left, current_right):
                 current_score = context_score(current_u, current_left, current_right, x, y)
                 return .5 * current_score.square()
@@ -540,6 +537,7 @@ class ContextualQuadraticDCT():
         self.amplitudes = self.context_scores.square().mean(dim=0).sqrt()
         self.signed_amplitudes = self.context_scores.mean(dim=0)
         return self.U, self.L, self.R
+
 
 class ExponentialDCT():
     def __init__(self, num_factors=512):
