@@ -5,9 +5,12 @@ log/
 .venv/
 *.pt
 profile.py
+triplet_privilege_results.json
 .python-version
 crosscoder-rep/
 crosscoder-rep/.cache/
 crosscoder-rep/.checkpoints/
 crosscoder-rep/wandb/
 e2e-sae-rep/
+privilege_experiment.py
+weight_experiment.py
