@@ -10,12 +10,17 @@ from scipy.optimize import root_scalar
 
 def directional_hessian_output(function, first, second, X, Y):
     """Return the context-mean output Hessian contraction H[:, first, second] at zero."""
+    return directional_hessian_outputs(function, first, second, X, Y).mean(dim=0)
+
+
+def directional_hessian_outputs(function, first, second, X, Y):
+    """Return one output Hessian contraction H[:, first, second] per context."""
     zero = torch.zeros_like(first)
 
     def first_direction_at(base):
         return jvp(lambda theta: function(theta, X, Y), (base,), (first,))[1]
 
-    return jvp(first_direction_at, (zero,), (second,))[1].mean(dim=0)
+    return jvp(first_direction_at, (zero,), (second,))[1]
 
 
 def directional_hessian_pullback(function, output_direction, source_direction, X, Y):
@@ -476,20 +481,25 @@ class AsymmetricQuadraticDCT():
                                          device=self.device, dtype=torch.float32), dim=0)
         self.objective_values = []
 
-        def context_score(u, left, right, x, y):
-            interaction = directional_hessian_output(delta_acts_single, left, right, x, y)
-            return u.float() @ interaction.float()
+        def context_scores(u, left, right, x, y):
+            interactions = directional_hessian_outputs(
+                delta_acts_single, left, right, x, y,
+            )
+            return interactions.float() @ u.float()
 
         def gradients(u, left, right, x, y):
-            score = context_score(u, left, right, x, y)
-            def objective(current_u, current_left, current_right):
-                current_score = context_score(current_u, current_left, current_right, x, y)
-                return .5 * current_score.square()
+            scores = context_scores(u, left, right, x, y)
 
-            return score.detach(), grad(objective, argnums=(0, 1, 2))(u, left, right)
+            def objective(current_u, current_left, current_right):
+                current_scores = context_scores(
+                    current_u, current_left, current_right, x, y,
+                )
+                return .5 * current_scores.square().sum()
+
+            return scores.detach(), grad(objective, argnums=(0, 1, 2))(u, left, right)
 
         batched_gradients = vmap(
-            gradients, in_dims=(1, 1, 1, None, None), out_dims=(0, (1, 1, 1)),
+            gradients, in_dims=(1, 1, 1, None, None), out_dims=(1, (1, 1, 1)),
             chunk_size=self.factor_batch_size,
         )
 
@@ -505,18 +515,16 @@ class AsymmetricQuadraticDCT():
             for start in range(0, self.num_samples, batch_size):
                 x_batch = X[start:start + batch_size].to(self.device)
                 y_batch = Y[start:start + batch_size].to(self.device)
-                for context in range(len(x_batch)):
-                    scores, updates = batched_gradients(
-                        self.U, self.L, self.R,
-                        x_batch[context:context + 1], y_batch[context:context + 1],
-                    )
-                    update_u, update_left, update_right = updates
-                    with torch.no_grad():
-                        score_energy += scores.square()
-                        U_update += update_u
-                        L_update += update_left
-                        R_update += update_right
-                    context_count += 1
+                scores, updates = batched_gradients(
+                    self.U, self.L, self.R, x_batch, y_batch,
+                )
+                update_u, update_left, update_right = updates
+                with torch.no_grad():
+                    score_energy += scores.square().sum(dim=0)
+                    U_update += update_u
+                    L_update += update_left
+                    R_update += update_right
+                context_count += len(x_batch)
             with torch.no_grad():
                 U_update /= context_count
                 L_update /= context_count
@@ -525,15 +533,9 @@ class AsymmetricQuadraticDCT():
                 self.L = F.normalize(beta * L_update + (1 - beta) * self.L, dim=0)
                 self.R = F.normalize(beta * R_update + (1 - beta) * self.R, dim=0)
                 self.objective_values.append(float((score_energy / context_count).sum()))
-        scores = []
-        for context in range(self.num_samples):
-            x = X[context:context + 1].to(self.device)
-            y = Y[context:context + 1].to(self.device)
-            scores.append(torch.stack([
-                context_score(self.U[:, factor], self.L[:, factor], self.R[:, factor], x, y)
-                for factor in range(self.num_factors)
-            ]))
-        self.context_scores = torch.stack(scores).detach()
+        self.context_scores = batched_gradients(
+            self.U, self.L, self.R, X.to(self.device), Y.to(self.device),
+        )[0].detach()
         self.amplitudes = self.context_scores.square().mean(dim=0).sqrt()
         self.signed_amplitudes = self.context_scores.mean(dim=0)
         return self.U, self.L, self.R
