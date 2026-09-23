@@ -1,6 +1,7 @@
 __pycache__/
 env/
 *.csv
+!harmful_behaviors.csv
 log/
 .venv/
 *.pt
