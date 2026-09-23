@@ -402,7 +402,7 @@ def parse_args():
     parser.add_argument("--heldout-contexts", type=int, default=64)
     parser.add_argument("--ood-contexts", type=int, default=64)
     parser.add_argument(
-        "--output", type=Path, default=ROOT / "ordered_branch_results.json",
+        "--output", type=Path, default=ROOT / "bilinear_quadratic_results.json",
     )
     return parser.parse_args()
 
