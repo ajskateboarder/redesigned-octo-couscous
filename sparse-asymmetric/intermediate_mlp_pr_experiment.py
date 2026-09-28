@@ -31,7 +31,7 @@ REPOSITORIES = {
 
 def read_texts(train_count, heldout_count):
     with (ROOT / ".." / "harmful_behaviors.csv").open() as handle:
-        texts = list(dict.fromkeys(row["target"].strip() for row in csv.DictReader(handle)))
+        texts = list(dict.fromkeys(row["goal"].strip() for row in csv.DictReader(handle)))
     random.Random(1729).shuffle(texts)
     if train_count + heldout_count > len(texts):
         raise ValueError("requested more unique texts than are available")
@@ -109,10 +109,10 @@ class IntermediateMLPFeatures(nn.Module):
     @staticmethod
     def hidden_features(mlp, values):
         if hasattr(mlp, "Left"):
-            left = mlp.Left(values)
+            left = mlp.left(values)
             if mlp.config.gated:
                 left = F.silu(left)
-            return left * mlp.Right(values)
+            return left * mlp.right(values)
         hidden = mlp.c_fc(values)
         return hidden.square() if mlp.config.squared_mlp else F.relu(hidden).square()
 

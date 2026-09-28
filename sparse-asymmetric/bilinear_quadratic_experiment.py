@@ -55,8 +55,8 @@ class BilinearSpan(nn.Module):
         if not 0 <= source_layer < target_layer <= model.config.n_layer:
             raise ValueError("span must satisfy 0 <= source < target <= n_layer")
         source_mlp = model.transformer.h[source_layer].mlp
-        if not hasattr(source_mlp, "Left") or source_mlp.config.gated:
-            raise ValueError("ordered branch interventions require an ungated bilinear source MLP")
+        if not hasattr(source_mlp, "Left"):
+            raise ValueError("ordered branch interventions require a two-branch source MLP")
         self.blocks = model.transformer.h[source_layer:target_layer]
         self.register_buffer("reference_values", state[0])
         self.register_buffer("initial_values", state[1])
@@ -80,10 +80,10 @@ class BilinearSpan(nn.Module):
             values = values + attention
             mlp_input = F.rms_norm(values, (values.shape[-1],))
             if relative_layer == 0:
-                hidden = (
-                    block.mlp.Left(mlp_input + theta_left)
-                    * block.mlp.Right(mlp_input + theta_right)
-                )
+                left = block.mlp.left(mlp_input + theta_left)
+                if block.mlp.config.gated:
+                    left = F.silu(left)
+                hidden = left * block.mlp.right(mlp_input + theta_right)
                 mlp_output = block.mlp.Down(hidden) + block.mlp.Down_bias
             else:
                 mlp_output = block.mlp(mlp_input)

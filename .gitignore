@@ -15,3 +15,4 @@ crosscoder-rep/wandb/
 e2e-sae-rep/
 privilege_experiment.py
 weight_experiment.py
+*_weights

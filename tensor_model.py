@@ -34,7 +34,8 @@ def apply_rotary_emb(x, cos, sin):
 
 class CastedLinear(nn.Linear):
     def forward(self, x):
-        return F.linear(x, self.weight.to(x.dtype))
+        bias = None if self.bias is None else self.bias.to(x.dtype)
+        return F.linear(x, self.weight.to(x.dtype), bias)
 
 class CausalSelfAttention(nn.Module):
 
@@ -183,14 +184,22 @@ class Bilinear(nn.Module):
         self.Left  = CastedLinear(config.n_embd, expansion_factor* config.n_embd, bias=False)
         self.Right  = CastedLinear(config.n_embd, expansion_factor* config.n_embd, bias=False)
         self.Down  = CastedLinear(expansion_factor* config.n_embd, config.n_embd, bias=False)
+        self.Left_bias = nn.Parameter(torch.zeros(config.n_embd))
+        self.Right_bias = nn.Parameter(torch.zeros(config.n_embd))
         self.Down_bias = nn.Parameter(torch.zeros(config.n_embd))
         self.Down.weight.data.zero_() # zero init suggested by @Grad62304977
 
+    def left(self, x):
+        return self.Left(x + self.Left_bias)
+
+    def right(self, x):
+        return self.Right(x + self.Right_bias)
+
     def forward(self, x):
         if(self.config.gated):
-            x = F.silu(self.Left(x))*self.Right(x)
+            x = F.silu(self.left(x))*self.right(x)
         else:
-            x = self.Left(x)*self.Right(x)
+            x = self.left(x)*self.right(x)
         x = self.Down(x) + self.Down_bias
         return x
 
@@ -244,6 +253,20 @@ class TensorGPT(nn.Module):
         ))
         self.lm_head = CastedLinear(config.n_embd, config.vocab_size, bias=False)
         self.lm_head.weight.data.zero_() # @Grad62304977
+
+    def logits(self, token_ids):
+        values = self.embedding_residual(token_ids)
+        initial_values = values
+        first_values = None
+
+        for block in self.transformer.h:
+            values, first_values = block(
+                values, first_values, initial_values
+            )
+
+        values = F.rms_norm(values, (values.size(-1),))
+        logits = self.lm_head(values)
+        return (30 * torch.tanh(logits / 30)).float()
 
     def forward(self, idx, target):
 
@@ -318,6 +341,16 @@ def load_tensor_gpt(repository, device="cuda"):
     config = TensorGPTConfig(**raw_config)
     model = TensorGPT(config)
     state = torch.load(weights_path, map_location="cpu", weights_only=True)
+    if config.bilinear:
+        for layer in range(config.n_layer):
+            state.setdefault(
+                f"transformer.h.{layer}.mlp.Left_bias",
+                model.transformer.h[layer].mlp.Left_bias.detach().clone(),
+            )
+            state.setdefault(
+                f"transformer.h.{layer}.mlp.Right_bias",
+                model.transformer.h[layer].mlp.Right_bias.detach().clone(),
+            )
     model.load_state_dict(state, strict=True)
     return model.to(device).eval(), config, {"step": step, "config_path": config_path, "weights_path": weights_path}
 
