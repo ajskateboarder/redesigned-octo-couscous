@@ -32,7 +32,7 @@ from intermediate_mlp_pr_experiment import (
 from tensor_model import CausalSelfAttention, TensorGPT, apply_rotary_emb, load_tensor_gpt
 
 
-class BilinearAttentionCircuitOperator(nn.Module):
+class SlicedModel(nn.Module):
     def __init__(
         self,
         model: TensorGPT,
@@ -68,7 +68,7 @@ class BilinearAttentionCircuitOperator(nn.Module):
         distances = (self.reference_values[:, None] - values[None, :]).square().flatten(2).sum(2)
         return distances.argmin(dim=0)
 
-    def attention_with_circuits(
+    def attn(
         self,
         attention: CausalSelfAttention,
         values: Float[Tensor, "batch sequence embedding"],
@@ -111,7 +111,6 @@ class BilinearAttentionCircuitOperator(nn.Module):
         selected_heads = head_values[:, :, self.target_positions]
         output_weight = attention.c_proj.weight.view(dimensions, heads, head_dimensions)
         projected_heads = torch.einsum("bhpd,chd->bhpc", selected_heads, output_weight)
-        # print(projected_heads[0, 0, :].squeeze())
         return attention_output, first_values, projected_heads
 
     def forward(
@@ -130,9 +129,7 @@ class BilinearAttentionCircuitOperator(nn.Module):
         for relative_layer, block in enumerate(self.blocks):
             values = block.lambdas[0] * values + block.lambdas[1] * initial_values
             attention_input = F.rms_norm(values, (values.shape[-1],))
-            attention_output, first_values, ov = self.attention_with_circuits(
-                block.attn, attention_input, first_values,
-            )
+            attention_output, first_values, ov = self.attn(block.attn, attention_input, first_values)
             values = values + attention_output
             mlp_input = F.rms_norm(values, (values.shape[-1],))
             if relative_layer == 0:
@@ -172,20 +169,24 @@ def normalized_head_pr(response):
 
 
 class AttentionRegularizedBilinearDCT:
-    def __init__(self, num_factors, penalty_weight, penalty_scale):
+    def __init__(
+        self, num_factors, penalty_weight, penalty_scale,
+        output_init="random", penalty_mode="uniform",
+    ):
         self.num_factors = num_factors
         self.penalty_weight = penalty_weight
         self.penalty_scale = penalty_scale
+        self.output_init = output_init
+        if penalty_mode not in ("uniform", "energy_weighted"):
+            raise ValueError(f"unknown penalty mode: {penalty_mode}")
+        self.penalty_mode = penalty_mode
 
-    def fit(self, operator, values, clean, batch_size, factor_batch_size, max_iters, seed):
-        torch.manual_seed(seed)
+    def fit(self, operator: SlicedModel, values, clean, batch_size, factor_batch_size, max_iters):
         dimensions = values.shape[-1]
         self.L = F.normalize(torch.randn(dimensions, self.num_factors, device=values.device), dim=0)
         self.R = F.normalize(torch.randn(dimensions, self.num_factors, device=values.device), dim=0)
         self.U = F.normalize(torch.randn(clean.shape[-1], self.num_factors, device=values.device), dim=0)
-        self.score_energy_trace = []
-        self.ov_pr_trace = []
-        self.objective_trace = []
+        self.objective_values = []
 
         def statistics(u, left, right, context_values, context_clean):
             target, ov = ordered_cross_hessian_outputs(
@@ -198,10 +199,9 @@ class AttentionRegularizedBilinearDCT:
             scores, ov_pr = statistics(
                 u, left, right, context_values, context_clean,
             )
-            value = (
-                0.5 * scores.square().sum()
-                - self.penalty_weight * self.penalty_scale * ov_pr.sum()
-            )
+            score_energy = scores.square()
+            penalty = ov_pr if self.penalty_mode == "uniform" else score_energy * ov_pr
+            value = 0.5 * score_energy.sum() - self.penalty_weight * self.penalty_scale * penalty.sum()
             return value, (scores, ov_pr)
 
         objective_with_grad = grad_and_value(objective, argnums=(0, 1, 2), has_aux=True)
@@ -223,6 +223,7 @@ class AttentionRegularizedBilinearDCT:
                 self.R, _ = torch.linalg.qr(self.R)
             score_energy = torch.zeros(self.num_factors, device=values.device)
             ov_pr_sum = torch.zeros(self.num_factors, device=values.device)
+            weighted_ov_pr_sum = torch.zeros(self.num_factors, device=values.device)
             update_u = torch.zeros_like(self.U)
             update_left = torch.zeros_like(self.L)
             update_right = torch.zeros_like(self.R)
@@ -236,6 +237,7 @@ class AttentionRegularizedBilinearDCT:
                 with torch.no_grad():
                     score_energy += scores.square().sum(dim=0)
                     ov_pr_sum += ov_pr.sum(dim=0)
+                    weighted_ov_pr_sum += (scores.square() * ov_pr).sum(dim=0)
                     update_u += updates[0]
                     update_left += updates[1]
                     update_right += updates[2]
@@ -246,17 +248,21 @@ class AttentionRegularizedBilinearDCT:
                 self.R = F.normalize(update_right / context_count, dim=0)
                 mean_energy = score_energy / context_count
                 mean_ov_pr = ov_pr_sum / context_count
-                self.score_energy_trace.append(float(mean_energy.sum()))
-                self.ov_pr_trace.append(float(mean_ov_pr.mean()))
-                self.objective_trace.append(float(
+                mean_weighted_ov_pr = weighted_ov_pr_sum / context_count
+                mean_penalty = (
+                    mean_ov_pr
+                    if self.penalty_mode == "uniform"
+                    else mean_weighted_ov_pr
+                )
+                self.objective_values.append(float(
                     0.5 * mean_energy.sum()
-                    - self.penalty_weight * self.penalty_scale * mean_ov_pr.sum()
+                    - self.penalty_weight * self.penalty_scale * mean_penalty.sum()
                 ))
         return self.U, self.L, self.R
 
 
 def make_operator(model, state, args):
-    operator = BilinearAttentionCircuitOperator(
+    operator = SlicedModel(
         model, state, args.source_layer, args.target_layer,
         slice(-args.target_positions, None),
     ).to(state[0].device)
@@ -392,9 +398,7 @@ def run(args):
                 "variant": name,
                 "penalty_weight": penalty_weight,
                 "penalty_scale": penalty_scale,
-                "score_energy_trace": dictionary.score_energy_trace,
-                "ov_pr_trace": dictionary.ov_pr_trace,
-                "objective_trace": dictionary.objective_trace,
+                "objective_values": dictionary.objective_values,
                 **split_results,
                 "factor_diversity": factor_diversity(dictionary),
                 "source_weight_alignment": alignment,

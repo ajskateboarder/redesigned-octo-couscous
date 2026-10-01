@@ -39,7 +39,7 @@ def read_texts(train_count, heldout_count):
 
 
 def collect_middle_inputs(model, tokenizer, texts, source_layer, sequence_length):
-    values, initial_values, first_values = [], [], []
+    residual_states, embedding_residual, first_attn = [], [], []
     for text in texts:
         token_ids = tokenizer(
             text, return_tensors="pt", truncation=True, padding="max_length",
@@ -47,10 +47,10 @@ def collect_middle_inputs(model, tokenizer, texts, source_layer, sequence_length
         ).input_ids.to(next(model.parameters()).device)
         with torch.no_grad():
             state = model.state_before_block(token_ids, source_layer)
-        values.append(state["values"].float())
-        initial_values.append(state["initial_values"].float())
-        first_values.append(state["first_values"].float())
-    return torch.cat(values), torch.cat(initial_values), torch.cat(first_values)
+        residual_states.append(state["values"].float())
+        embedding_residual.append(state["initial_values"].float())
+        first_attn.append(state["first_values"].float())
+    return torch.cat(residual_states), torch.cat(embedding_residual), torch.cat(first_attn)
 
 
 class MiddleSpanOperator(nn.Module):
