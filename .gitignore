@@ -5,6 +5,7 @@ env/
 log/
 .venv/
 *.pt
+*.npz
 profile.py
 triplet_privilege_results.json
 .python-version

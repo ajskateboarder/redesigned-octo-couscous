@@ -113,6 +113,14 @@ class SlicedModel(nn.Module):
         projected_heads = torch.einsum("bhpd,chd->bhpc", selected_heads, output_weight)
         return attention_output, first_values, projected_heads
 
+    @staticmethod
+    def mlp(mlp, values, theta_left=0.0, theta_right=0.0):
+        left = mlp.left(values + theta_left)
+        if mlp.config.gated:
+            # fused F.silu has no nested forward-mode AD
+            left = left * torch.sigmoid(left)
+        return mlp.Down(left * mlp.right(values + theta_right)) + mlp.Down_bias
+
     def forward(
         self,
         theta_left: Float[Tensor, "embedding"],
@@ -133,14 +141,10 @@ class SlicedModel(nn.Module):
             values = values + attention_output
             mlp_input = F.rms_norm(values, (values.shape[-1],))
             if relative_layer == 0:
-                hidden = (
-                    block.mlp.left(mlp_input + theta_left)
-                    * block.mlp.right(mlp_input + theta_right)
-                )
-                mlp_output = block.mlp.Down(hidden) + block.mlp.Down_bias
+                mlp_output = self.mlp(block.mlp, mlp_input, theta_left, theta_right)
             else:
                 ov_features.append(ov)
-                mlp_output = block.mlp(mlp_input)
+                mlp_output = self.mlp(block.mlp, mlp_input)
             values = values + mlp_output
         assert ov_features, "the exclusive layer range contains no attention layers"
 
@@ -171,22 +175,37 @@ def normalized_head_pr(response):
 class AttentionRegularizedBilinearDCT:
     def __init__(
         self, num_factors, penalty_weight, penalty_scale,
-        output_init="random", penalty_mode="uniform",
+        target_head_pr=None, target_penalty_mode="energy_weighted",
+        penalty_warmup_iters=0, update_rate=1.0,
     ):
+        if target_head_pr is not None and not 0.0 <= target_head_pr <= 1.0:
+            raise ValueError("target head PR must be between zero and one")
+        if target_penalty_mode not in {"energy_weighted", "unweighted"}:
+            raise ValueError(f"unknown target penalty mode: {target_penalty_mode}")
+        if penalty_warmup_iters < 0:
+            raise ValueError("penalty warmup iterations must be nonnegative")
+        if not 0.0 < update_rate <= 1.0:
+            raise ValueError("update rate must be between zero and one")
         self.num_factors = num_factors
         self.penalty_weight = penalty_weight
         self.penalty_scale = penalty_scale
-        self.output_init = output_init
-        if penalty_mode not in ("uniform", "energy_weighted"):
-            raise ValueError(f"unknown penalty mode: {penalty_mode}")
-        self.penalty_mode = penalty_mode
+        self.target_head_pr = target_head_pr
+        self.target_penalty_mode = target_penalty_mode
+        self.penalty_warmup_iters = penalty_warmup_iters
+        self.update_rate = update_rate
 
-    def fit(self, operator: SlicedModel, values, clean, batch_size, factor_batch_size, max_iters):
+    def fit(
+        self, operator: SlicedModel, values, clean,
+        batch_size, factor_batch_size, max_iters, seed=None,
+    ):
+        if seed is not None:
+            torch.manual_seed(seed)
         dimensions = values.shape[-1]
         self.L = F.normalize(torch.randn(dimensions, self.num_factors, device=values.device), dim=0)
         self.R = F.normalize(torch.randn(dimensions, self.num_factors, device=values.device), dim=0)
         self.U = F.normalize(torch.randn(clean.shape[-1], self.num_factors, device=values.device), dim=0)
         self.objective_values = []
+        current_penalty_weight = self.penalty_weight
 
         def statistics(u, left, right, context_values, context_clean):
             target, ov = ordered_cross_hessian_outputs(
@@ -200,9 +219,19 @@ class AttentionRegularizedBilinearDCT:
                 u, left, right, context_values, context_clean,
             )
             score_energy = scores.square()
-            penalty = ov_pr if self.penalty_mode == "uniform" else score_energy * ov_pr
-            value = 0.5 * score_energy.sum() - self.penalty_weight * self.penalty_scale * penalty.sum()
-            return value, (scores, ov_pr)
+            if self.target_head_pr is None:
+                penalty_terms = score_energy * ov_pr
+            else:
+                pr_penalty = F.relu(ov_pr - self.target_head_pr).square()
+                if self.target_penalty_mode == "energy_weighted":
+                    penalty_terms = score_energy * pr_penalty
+                else:
+                    penalty_terms = pr_penalty
+            value = (
+                0.5 * score_energy.sum()
+                - current_penalty_weight * self.penalty_scale * penalty_terms.sum()
+            )
+            return value, (scores, penalty_terms)
 
         objective_with_grad = grad_and_value(objective, argnums=(0, 1, 2), has_aux=True)
 
@@ -217,13 +246,16 @@ class AttentionRegularizedBilinearDCT:
             out_dims=(1, 1, (1, 1, 1)), chunk_size=factor_batch_size,
         )
 
-        for _ in trange(max_iters):
+        for iteration in trange(max_iters):
+            if self.penalty_warmup_iters:
+                current_penalty_weight = self.penalty_weight * min(
+                    1.0, (iteration + 1) / self.penalty_warmup_iters,
+                )
             with torch.no_grad():
-                self.L, _ = torch.linalg.qr(self.L)
-                self.R, _ = torch.linalg.qr(self.R)
+                self.L = torch.linalg.qr(self.L).Q
+                self.R = torch.linalg.qr(self.R).Q
             score_energy = torch.zeros(self.num_factors, device=values.device)
-            ov_pr_sum = torch.zeros(self.num_factors, device=values.device)
-            weighted_ov_pr_sum = torch.zeros(self.num_factors, device=values.device)
+            penalty_sum = torch.zeros(self.num_factors, device=values.device)
             update_u = torch.zeros_like(self.U)
             update_left = torch.zeros_like(self.L)
             update_right = torch.zeros_like(self.R)
@@ -231,32 +263,34 @@ class AttentionRegularizedBilinearDCT:
             for start in range(0, len(values), batch_size):
                 batch_values = values[start:start + batch_size]
                 batch_clean = clean[start:start + batch_size]
-                scores, ov_pr, updates = batched_gradients(
+                scores, penalty_terms, updates = batched_gradients(
                     self.U, self.L, self.R, batch_values, batch_clean,
                 )
                 with torch.no_grad():
                     score_energy += scores.square().sum(dim=0)
-                    ov_pr_sum += ov_pr.sum(dim=0)
-                    weighted_ov_pr_sum += (scores.square() * ov_pr).sum(dim=0)
+                    penalty_sum += penalty_terms.sum(dim=0)
                     update_u += updates[0]
                     update_left += updates[1]
                     update_right += updates[2]
                 context_count += len(batch_values)
             with torch.no_grad():
-                self.U = F.normalize(update_u / context_count, dim=0)
-                self.L = F.normalize(update_left / context_count, dim=0)
-                self.R = F.normalize(update_right / context_count, dim=0)
-                mean_energy = score_energy / context_count
-                mean_ov_pr = ov_pr_sum / context_count
-                mean_weighted_ov_pr = weighted_ov_pr_sum / context_count
-                mean_penalty = (
-                    mean_ov_pr
-                    if self.penalty_mode == "uniform"
-                    else mean_weighted_ov_pr
+                target_u = F.normalize(update_u / context_count, dim=0)
+                target_left = F.normalize(update_left / context_count, dim=0)
+                target_right = F.normalize(update_right / context_count, dim=0)
+                self.U = F.normalize(
+                    self.U.lerp(target_u, self.update_rate), dim=0,
                 )
+                self.L = F.normalize(
+                    self.L.lerp(target_left, self.update_rate), dim=0,
+                )
+                self.R = F.normalize(
+                    self.R.lerp(target_right, self.update_rate), dim=0,
+                )
+                mean_energy = score_energy / context_count
+                mean_penalty = penalty_sum / context_count
                 self.objective_values.append(float(
                     0.5 * mean_energy.sum()
-                    - self.penalty_weight * self.penalty_scale * mean_penalty.sum()
+                    - current_penalty_weight * self.penalty_scale * mean_penalty.sum()
                 ))
         return self.U, self.L, self.R
 
@@ -356,14 +390,7 @@ def run(args):
                 operators[0][1], states[0][0], operators[0][0],
                 args.fit_context_batch, args.factor_batch, args.iterations, seed,
             )
-        baseline_energy = evaluate(
-            baseline, operators[0][2], states[0][0], operators[0][0], args.context_batch,
-        )["mean_total_energy"]
-        penalty_scale = (
-            args.penalty_scale
-            if args.penalty_scale is not None
-            else baseline_energy / args.factors
-        )
+        penalty_scale = args.penalty_scale if args.penalty_scale is not None else 1.0
         for name, penalty_weight in variant_specs:
             if name == "baseline":
                 dictionary = baseline
@@ -420,7 +447,7 @@ def run(args):
                 })
         stability[name] = comparisons
     result = {
-        "description": "Bilinear branch-intervention DCT with attention OV-head PR penalty",
+        "description": "Bilinear branch-intervention DCT with energy-weighted attention OV-head PR penalty",
         "architecture": "bilinear",
         "repository": REPOSITORIES["bilinear"],
         "model_metadata": metadata,
@@ -431,6 +458,7 @@ def run(args):
         "factors": args.factors,
         "iterations": args.iterations,
         "penalty_weights": args.penalty_weights,
+        "penalty_mode": "energy_weighted",
         "penalty_scale_override": args.penalty_scale,
         "train_contexts": args.train_contexts,
         "heldout_contexts": args.heldout_contexts,
@@ -460,7 +488,10 @@ def parse_args():
     parser.add_argument("--heldout-contexts", type=int, default=64)
     parser.add_argument("--ood-contexts", type=int, default=64)
     parser.add_argument("--penalty-weights", type=float, nargs="+", default=(0.03,))
-    parser.add_argument("--penalty-scale", type=float)
+    parser.add_argument(
+        "--penalty-scale", type=float,
+        help="Additional energy-weighted PR multiplier (default: 1.0)",
+    )
     parser.add_argument(
         "--output", type=Path, default=ROOT / "bilinear_attention_pr_results.json",
     )
