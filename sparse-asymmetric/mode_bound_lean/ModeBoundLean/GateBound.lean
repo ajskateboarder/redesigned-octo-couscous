@@ -16,7 +16,11 @@ actual fingerprints `P_ρ = GᵀG / ‖G‖²_F` of `Budget.lean`, with the Frob
 * `gate_count_fingerprint`: gates `(eₐ, sₐ)` with `p(1-p) ≥ c` and `|E[qₐ | on] - E[qₐ | off]| ≥ δ`, `qₐ = sₐᵀPsₐ`,
   satisfy `m · c · δ² ≤ B·κ ≤ B`, where `B` is the channels' frame bound in the Frobenius sense.
 * `gate_count_orthonormal`: with orthonormal channels, `m · c · δ² ≤ 1`. With contrast `γ = d·δ` this is
-  `m ≤ d² / (p(1-p)·γ²)` for any model, any data and any number of neurons.
+  `m ≤ d² / (p(1-p)·γ²)` for any model, any data and any number of neurons. There are at most `d` orthonormal
+  channels, so this says more than `m ≤ d` only when `p(1-p)·γ² > d`.
+* `gate_count_traceless`: overlapping channels only need a frame bound `B₀` on trace-zero matrices, since `P - P̄` has
+  trace `0`: `m · c · δ² ≤ B₀·κ`. For random channels `B₀` stays small far beyond `d` channels, while the full frame
+  bound grows like `1 + m/d`.
 -/
 
 open Module Finset
@@ -201,18 +205,15 @@ theorem sum_var_fingerprint_le (hμ : ∀ ρ, 0 ≤ μ ρ) {ι : Type*} [Fintype
   exact mul_le_mul_of_nonneg_left
     (hB _ ((fingerprint_isPositive (g ρ)).isSymmetric.sub (meanFP_isSymmetric μ g))) (hμ ρ)
 
-/-- **The gate bound**: gates `(eₐ, sₐ)` on fingerprints, with `p(1-p) ≥ c` and `|E[qₐ | on] - E[qₐ | off]| ≥ δ`
-(contrast `γ = d·δ`), on channels of Frobenius frame bound `B`, satisfy `m · c · δ² ≤ B·κ`, and `κ ≤ 1`. -/
-theorem gate_count_fingerprint (hμ : ∀ ρ, 0 ≤ μ ρ) (hsum : ∑ ρ, μ ρ = 1) {ι : Type*} [Fintype ι] (s : ι → E)
-    {B : ℝ} (hB : ∀ D : E →ₗ[ℝ] E, D.IsSymmetric → ∑ a, ⟪D (s a), s a⟫ ^ 2 ≤ B * hsSq D)
+/-- Each gate pays `p(1-p)·δ²` of variance in its own channel (Theorem 5 (a)), so `m` gates pay `m·c·δ²` in total. -/
+theorem card_mul_le_sum_var (hμ : ∀ ρ, 0 ≤ μ ρ) (hsum : ∑ ρ, μ ρ = 1) {ι : Type*} [Fintype ι] (s : ι → E)
     (e : ι → Ω → Prop) [∀ a, DecidablePred (e a)] (hp : ∀ a, 0 < mass μ (e a)) (hp' : ∀ a, mass μ (e a) < 1)
     {c δ : ℝ} (hc : ∀ a, c ≤ mass μ (e a) * (1 - mass μ (e a))) (hδ : 0 ≤ δ)
     (hδa : ∀ a, δ ≤ |condMean μ (e a) (fun ρ => ⟪fingerprint (g ρ) (s a), s a⟫) -
       condMean μ (fun ρ => ¬ e a ρ) (fun ρ => ⟪fingerprint (g ρ) (s a), s a⟫)|) :
-    Fintype.card ι * (c * δ ^ 2) ≤ B * kappa μ g ∧ kappa μ g ≤ 1 := by
-  refine ⟨?_, kappa_le_one μ g hμ hsum⟩
+    Fintype.card ι * (c * δ ^ 2) ≤ ∑ a, var μ (fun ρ => ⟪fingerprint (g ρ) (s a), s a⟫) := by
   calc (Fintype.card ι : ℝ) * (c * δ ^ 2) = ∑ _a : ι, c * δ ^ 2 := by simp
-    _ ≤ ∑ a, var μ (fun ρ => ⟪fingerprint (g ρ) (s a), s a⟫) := sum_le_sum fun a _ => by
+    _ ≤ _ := sum_le_sum fun a _ => by
         have h := contrast_sq_le_var μ hμ hsum (e a) (fun ρ => ⟪fingerprint (g ρ) (s a), s a⟫) (hp a) (hp' a)
         have hpq : 0 ≤ mass μ (e a) * (1 - mass μ (e a)) := mul_nonneg (hp a).le (by linarith [hp' a])
         have hsq : δ ^ 2 ≤ (condMean μ (e a) (fun ρ => ⟪fingerprint (g ρ) (s a), s a⟫) -
@@ -223,7 +224,63 @@ theorem gate_count_fingerprint (hμ : ∀ ρ, 0 ≤ μ ρ) (hsum : ∑ ρ, μ ρ
               mul_le_mul_of_nonneg_right (hc a) (sq_nonneg δ)
           _ ≤ _ := mul_le_mul_of_nonneg_left hsq hpq
           _ ≤ _ := h
-    _ ≤ B * kappa μ g := sum_var_fingerprint_le μ g hμ s hB
+
+/-- **The gate bound**: gates `(eₐ, sₐ)` on fingerprints, with `p(1-p) ≥ c` and `|E[qₐ | on] - E[qₐ | off]| ≥ δ`
+(contrast `γ = d·δ`), on channels of Frobenius frame bound `B`, satisfy `m · c · δ² ≤ B·κ`, and `κ ≤ 1`. -/
+theorem gate_count_fingerprint (hμ : ∀ ρ, 0 ≤ μ ρ) (hsum : ∑ ρ, μ ρ = 1) {ι : Type*} [Fintype ι] (s : ι → E)
+    {B : ℝ} (hB : ∀ D : E →ₗ[ℝ] E, D.IsSymmetric → ∑ a, ⟪D (s a), s a⟫ ^ 2 ≤ B * hsSq D)
+    (e : ι → Ω → Prop) [∀ a, DecidablePred (e a)] (hp : ∀ a, 0 < mass μ (e a)) (hp' : ∀ a, mass μ (e a) < 1)
+    {c δ : ℝ} (hc : ∀ a, c ≤ mass μ (e a) * (1 - mass μ (e a))) (hδ : 0 ≤ δ)
+    (hδa : ∀ a, δ ≤ |condMean μ (e a) (fun ρ => ⟪fingerprint (g ρ) (s a), s a⟫) -
+      condMean μ (fun ρ => ¬ e a ρ) (fun ρ => ⟪fingerprint (g ρ) (s a), s a⟫)|) :
+    Fintype.card ι * (c * δ ^ 2) ≤ B * kappa μ g ∧ kappa μ g ≤ 1 :=
+  ⟨(card_mul_le_sum_var μ g hμ hsum s e hp hp' hc hδ hδa).trans (sum_var_fingerprint_le μ g hμ s hB),
+    kappa_le_one μ g hμ hsum⟩
+
+/-! ### Overlapping channels: only trace-zero directions matter
+
+Fingerprints all have trace `1`, so `P - P̄` has trace `0`, and the frame bound is only needed on trace-zero `D`. On
+those, `⟪D s, s⟫` does not see the part `I/d` that every `ssᵀ` shares, which is what makes the full frame bound of `m`
+random channels grow like `1 + m/d`. -/
+
+/-- If every row has a nonzero gradient, fingerprint deviations `P - P̄` have trace `0`. -/
+theorem trace_fingerprint_sub_meanFP (hsum : ∑ ρ, μ ρ = 1) (hg : ∀ ρ, ∑ k, ‖g ρ k‖ ^ 2 ≠ 0) (ρ : Ω) :
+    LinearMap.trace ℝ E (fingerprint (g ρ) - meanFP μ g) = 0 := by
+  rw [map_sub, trace_fingerprint _ (hg ρ), trace_meanFP μ g hsum hg, sub_self]
+
+/-- **Theorem 5 (c)**, trace-zero frame bound: `Σₐ Var qₐ ≤ B₀·κ` when `Σₐ (sₐᵀDsₐ)² ≤ B₀‖D‖²_F` for trace-zero
+symmetric `D`. -/
+theorem sum_var_fingerprint_le_traceless (hμ : ∀ ρ, 0 ≤ μ ρ) (hsum : ∑ ρ, μ ρ = 1)
+    (hg : ∀ ρ, ∑ k, ‖g ρ k‖ ^ 2 ≠ 0) {ι : Type*} [Fintype ι] (s : ι → E) {B : ℝ}
+    (hB : ∀ D : E →ₗ[ℝ] E, D.IsSymmetric → LinearMap.trace ℝ E D = 0 → ∑ a, ⟪D (s a), s a⟫ ^ 2 ≤ B * hsSq D) :
+    ∑ a, var μ (fun ρ => ⟪fingerprint (g ρ) (s a), s a⟫) ≤ B * kappa μ g := by
+  have hmean : ∀ a, mean μ (fun ρ => ⟪fingerprint (g ρ) (s a), s a⟫) = ⟪meanFP μ g (s a), s a⟫ := fun a => by
+    simp [mean, meanFP, LinearMap.sum_apply, sum_inner, real_inner_smul_left]
+  have hdiff : ∀ a ρ, ⟪fingerprint (g ρ) (s a), s a⟫ - ⟪meanFP μ g (s a), s a⟫ =
+      ⟪(fingerprint (g ρ) - meanFP μ g) (s a), s a⟫ := fun a ρ => by
+    rw [LinearMap.sub_apply, inner_sub_left]
+  simp only [var, hmean, hdiff]
+  rw [sum_comm, kappa, mul_sum]
+  refine sum_le_sum fun ρ _ => ?_
+  rw [← mul_sum, mul_left_comm]
+  exact mul_le_mul_of_nonneg_left
+    (hB _ ((fingerprint_isPositive (g ρ)).isSymmetric.sub (meanFP_isSymmetric μ g))
+      (trace_fingerprint_sub_meanFP μ g hsum hg ρ)) (hμ ρ)
+
+/-- **The gate bound, overlapping channels**: with every row's gradient nonzero, gates on channels whose frame bound on
+trace-zero matrices is `B₀` satisfy `m · c · δ² ≤ B₀·κ ≤ B₀·(1 - 1/d)`. For `m` random channels `B₀` stays near
+`(1 + √(2m)/d)²` (`mode_bound.md` §5), while the full frame bound grows like `1 + m/d`. -/
+theorem gate_count_traceless (hμ : ∀ ρ, 0 ≤ μ ρ) (hsum : ∑ ρ, μ ρ = 1) (hg : ∀ ρ, ∑ k, ‖g ρ k‖ ^ 2 ≠ 0)
+    {ι : Type*} [Fintype ι] (s : ι → E) {B : ℝ}
+    (hB : ∀ D : E →ₗ[ℝ] E, D.IsSymmetric → LinearMap.trace ℝ E D = 0 → ∑ a, ⟪D (s a), s a⟫ ^ 2 ≤ B * hsSq D)
+    (e : ι → Ω → Prop) [∀ a, DecidablePred (e a)] (hp : ∀ a, 0 < mass μ (e a)) (hp' : ∀ a, mass μ (e a) < 1)
+    {c δ : ℝ} (hc : ∀ a, c ≤ mass μ (e a) * (1 - mass μ (e a))) (hδ : 0 ≤ δ)
+    (hδa : ∀ a, δ ≤ |condMean μ (e a) (fun ρ => ⟪fingerprint (g ρ) (s a), s a⟫) -
+      condMean μ (fun ρ => ¬ e a ρ) (fun ρ => ⟪fingerprint (g ρ) (s a), s a⟫)|) :
+    Fintype.card ι * (c * δ ^ 2) ≤ B * kappa μ g ∧ kappa μ g ≤ 1 - 1 / finrank ℝ E :=
+  ⟨(card_mul_le_sum_var μ g hμ hsum s e hp hp' hc hδ hδa).trans
+      (sum_var_fingerprint_le_traceless μ g hμ hsum hg s hB),
+    kappa_le_one_sub μ g hμ hsum hg⟩
 
 /-- **The gate bound, orthonormal channels**: `m · c · δ² ≤ 1`, i.e. with contrast `γ = d·δ` and `p(1-p) ≥ c`, at most
 `d² / (c·γ²)` gates, for any model, any data and any number of neurons. -/

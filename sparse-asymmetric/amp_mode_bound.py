@@ -344,7 +344,7 @@ for k, (kind, S, _, _) in enumerate(sets):
         ev, vec = torch.linalg.eigh(Ms[k].double())
         chans += [(ev[m].item(), vec[:, m].float(), kind if kind.startswith("o") else str(S), S) for m in torch.nonzero(ev >= tmin)[:, 0]]
 print(f"\ngates: positive modes with d·λ ≥ γ, openers = all single neurons + greedy, given and the run's openers")
-gate_sets = {}
+gate_sets, chan_S = {}, {}
 for g in GAMMAS:
     t = g / D
     cs = [c for c in chans if c[0] >= t]
@@ -358,14 +358,18 @@ for g in GAMMAS:
     best.sort(key=lambda q: -cs[q][0])
     Sd = Sm[:, best]
     B = torch.linalg.eigvalsh(((Sd.T @ Sd) ** 2).double())[-1].item()
-    q = torch.einsum("dm,nde,em->nm", Sd, fit.X.view(-1, D, D), Sd)
+    B0 = torch.linalg.eigvalsh(((Sd.T @ Sd) ** 2 - 1 / D).double())[-1].item()   # frame bound on trace-zero D (Thm 5″)
+    chan_S[g] = Sd.cpu()
+    q = torch.cat([torch.einsum("nde,em->ndm", fit.X[i:i + 64].view(-1, D, D), Sd).mul(Sd).sum(1) for i in range(0, fit.N, 64)])
     varq, c = q.var(0), tail * (1 - tail) * t ** 2
     mult = np.bincount(lab)[lab[best]]
     vk = torch.einsum("dm,de,em->m", Sd, V1, Sd)
-    summary[g].update(pairs=len(cs), channels=len(best), B=B, thm5=thm5(c / B), thm5_kappa=kappa * B / c, thm5b=thm5b(c, B)[0])
+    summary[g].update(pairs=len(cs), channels=len(best), B=B, B0=B0, thm5=thm5(c / B), thm5_kappa=kappa * B / c,
+                      thm5_kappa0=kappa * B0 / c, thm5b=thm5b(c, B)[0])
     gate_sets[g] = [cs[q][3] for q in best]
-    print(f"   γ = {g:g}: {len(cs)} (opener, mode) pairs, {len(best)} distinct channels; frame bound B {B:.2f}; Thm 5: m ≤ "
-          f"{thm5(c / B)} (spectral), ≤ {thm5b(c, B)[0]:.1f} (5'), ≤ {kappa * B / c:.1f} (κ); Var(sᵀPs) / p(1-p)(γ/d)²: min {(varq / c).min():.2f}, "
+    print(f"   γ = {g:g}: {len(cs)} (opener, mode) pairs, {len(best)} distinct channels; frame bound B {B:.2f}, trace-zero B₀ {B0:.2f} "
+          f"(random: {(1 + math.sqrt(2 * len(best)) / D) ** 2:.2f}); Thm 5: m ≤ "
+          f"{thm5(c / B)} (spectral), ≤ {thm5b(c, B)[0]:.1f} (5'), ≤ {kappa * B / c:.1f} (κ), ≤ {kappa * B0 / c:.1f} (κ, B₀); Var(sᵀPs) / p(1-p)(γ/d)²: min {(varq / c).min():.2f}, "
           f"median {(varq / c).median():.2f}")
     for n, q_ in enumerate(best[:8]):
         print(f"      channel {n}: best opener {cs[q_][2]} (d·λ {D * cs[q_][0]:.0f}), opened by {mult[n]} of the openers | "
@@ -385,6 +389,7 @@ for g in GAMMAS:
 
 # --- step 5: principal angles between span(w_S) of the openers of distinct channels; diagonal Fisher shares
 for g, gs_ in gate_sets.items():
+    gs_ = gs_[:40]                                                # strongest 40 channels: the pair loop is quadratic
     if len(gs_) > 1:
         Us = [torch.linalg.qr(W[:, S])[0] for S in gs_]
         cosm = [torch.linalg.svdvals(Us[i].T @ Us[j])[0].item() for i in range(len(Us)) for j in range(i + 1, len(Us))
@@ -421,6 +426,6 @@ out.mkdir(exist_ok=True)
 torch.save({"args": vars(cli), "model": S_.args.model, "d": D, "H": H, "kappa": kappa, "lamK": lamK[:256].cpu(),
             "ev1": ev1.cpu(), "ev1h": ev1h.cpu(), "nE1": nE1.cpu(), "qmq1": qmq1.cpu(), "noise": eps.cpu(),
             "sets": [(k_, S) for k_, S, _, _ in sets], "evS": evS.cpu(), "evSh": evSh.cpu(), "nES": nES.cpu(),
-            "evK": evK.cpu(), "qmqS": qmqS.cpu(), "share1": share1.cpu(), "summary": summary,
+            "evK": evK.cpu(), "qmqS": qmqS.cpu(), "share1": share1.cpu(), "summary": summary, "channels": chan_S,
             "pipeline_attractors": len(res["reps"])}, out / f"{path.stem}.pt")
 print(f"\nsaved {out / (path.stem + '.pt')}")

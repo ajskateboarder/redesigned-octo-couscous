@@ -24,6 +24,7 @@ eigenvalues `≥ t` (modes that open) or `≤ -t` (modes that close).
 | Theorem 5 (c): `Σₐ Var qₐ ≤ B κ`; `m · c · δ² ≤ B κ` | `sum_var_le`, `gate_count_var` | Variance |
 | `‖P‖²_F ≤ 1` for every fingerprint; `κ = E‖P - P̄‖²_F ≤ 1` | `hsSq_fingerprint_le_one`, `kappa_le_one` | GateBound |
 | `κ ≤ 1 - 1/d` when every row has a nonzero gradient (`(tr D)² ≤ d·‖D‖²_F`, `tr P̄ = 1`) | `kappa_le_one_sub`, `trace_sq_le_hsSq`, `trace_meanFP` | GateBound |
+| Theorem 5″(a): gate count with the frame bound on trace-zero matrices only | `gate_count_traceless`, `sum_var_fingerprint_le_traceless`, `trace_fingerprint_sub_meanFP` | GateBound |
 | **Gate bound**: for fingerprints, `m · c · δ² ≤ B κ ≤ B`; orthonormal channels: `m ≤ d²/(p(1-p) γ²)` | `gate_count_fingerprint`, `gate_count_orthonormal` | GateBound |
 | width: inertia of `Σᵢ cᵢ wᵢwᵢᵀ` ≤ `H` | `inertia_le` | Width |
 | Prop. 6 / Example 9: `m` bilinear gates need exactly `2m` neurons | `two_mul_le_width`, `sqNet_bilinearGates` | Width |
@@ -42,7 +43,8 @@ eigenvalues `≥ t` (modes that open) or `≤ -t` (modes that close).
 
 ## Not formalized
 
-* Theorem 4 (matrix Bernstein; finite-sample statements).
+* Theorem 4 (matrix Bernstein; finite-sample statements) and Theorem 5″(b), (c) (matrix Chernoff, and the
+  Kogan–Nandy–Huang edge theorem, for random channels): Mathlib has no matrix concentration or random-matrix results.
 * The spectral forms that need von Neumann's trace inequality or the eigenvalues of `K`: Theorem 5 (b) and 5′, the
   spectral version of Theorem 7.
 * Proposition 6 (a)–(c) for general activations: Hessians of an MLP via calculus, and the Hessian span of sigmoid gates.

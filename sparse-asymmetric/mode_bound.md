@@ -190,6 +190,93 @@ In particular, if γ > d·√(λ₂/(p(1−p))), every gate channel aligns with 
 *Proof.* c ≤ Var(s_aᵀPs_a) = Σ_i λ_i⟨X_a, V_i⟩² ≤ λ₁y_a + λ_{j+1}(1 − y_a), since Σ_i⟨X_a, V_i⟩² = ‖X_a‖² = 1. That
 gives y_a ≥ β_j. Summing, mβ_j ≤ Σ_{i≤j}Σ_a⟨X_a, V_i⟩² ≤ Σ_{i≤j} B‖V_i‖² = Bj. ∎
 
+### Theorem 5″ (overlapping channels: only the trace-zero part counts)
+
+Theorem 5's B is the frame bound of the X_a on all of Sym(d). Every X_a = s_a s_aᵀ has the same component I/d along
+the identity, so for m random channels B ≈ 1 + m/d, and (c) says nothing once m ≫ d. Perpendicular channels avoid
+this, but there are at most d of them, so the orthonormal form of (c), m ≤ d²/(p(1−p)γ²), only beats the trivial m ≤ d
+when p(1−p)γ² > d. For superposition the bound has to work with B on trace-zero matrices.
+
+Let V = {D ∈ Sym(d) : tr D = 0}, of dimension N = d(d+1)/2 − 1, and let B₀ = λ_max([(s_a·s_b)² − 1/d]_{ab}). This is
+the frame bound of the y_a = X_a − I/d, which are the X_a projected onto V, so Σ_a (s_aᵀDs_a)² ≤ B₀‖D‖²_F for D ∈ V.
+
+**(a) Deterministic.** If every row has G ≠ 0, then m·p_min(1−p_min)γ²/d² ≤ B₀κ ≤ B₀(1 − 1/d).
+
+*Proof.* tr P = 1 on every row, so tr(P − P̄) = 0, and the proof of Theorem 5(c) only applies the frame bound to
+P − P̄ ∈ V. On V, ⟨X_a, D⟩ = ⟨y_a, D⟩. ∎
+
+**(b) Random channels.** Let s_1…s_M be independent and uniform on the unit sphere. For every η ∈ (0, 1), with
+probability at least 1 − η,
+
+  B₀ < max{ 2e²M/(d(d+2)), log(d²/η) }.
+
+A subset of a dictionary has a frame bound no larger than the dictionary's (T below is a sum of PSD terms). So with the
+same probability, *every* set of gates on distinct channels from the dictionary, in any model trained on any data,
+satisfies m ≤ B₀·d²/(p_min(1−p_min)γ²). For M ≤ d²·log(d²/η)/(2e²) this is m ≤ d²·log(d²/η)/(p_min(1−p_min)γ²).
+
+*Proof.* Let T = Σ_a y_a y_aᵀ act on V. Then B₀ = λ_max(T), since T and the Gram matrix [⟨y_a, y_b⟩] = [(s_a·s_b)² − 1/d]
+have the same nonzero eigenvalues.
+1. ‖y_a‖² = 1 − 2/d + 1/d = 1 − 1/d =: R ≤ 1, so each y_a y_aᵀ is PSD with λ_max ≤ R.
+2. E[y yᵀ] = 2/(d(d+2)) · Id_V. For D ∈ V, ⟨y, D⟩ = sᵀDs. Write a standard Gaussian vector as g = ‖g‖s, with ‖g‖
+   independent of s. Then E(gᵀDg)² = 2‖D‖²_F + (tr D)² = 2‖D‖²_F and E‖g‖⁴ = d(d+2), so E(sᵀDs)² = 2‖D‖²_F/(d(d+2)).
+   A symmetric operator whose quadratic form is a constant times ‖D‖² is that constant times the identity. So
+   μ := λ_max(E T) = 2M/(d(d+2)).
+3. Matrix Chernoff (Tropp 2012, *User-friendly tail bounds*, Thm 1.1): for independent PSD summands with λ_max ≤ R on an
+   N-dimensional space, P{λ_max(T) ≥ (1+ε)μ} ≤ N·[e^ε/(1+ε)^{1+ε}]^{μ/R}. Put t = (1+ε)μ and use
+   ε − (1+ε)log(1+ε) ≤ (1+ε)(1 − log(1+ε)). The bound is at most N·exp((t/R)(1 − log(t/μ))), which for t ≥ e²μ is at
+   most N·e^{−t/R} ≤ N·e^{−t}.
+4. Take t = max{e²μ, log(N/η)}. Since N ≤ d², P{B₀ ≥ t} ≤ η. ∎
+
+Bound (b) carries a log d factor that the truth does not. In simulation, B₀ tracks (1 + √(2M)/d)², the
+Marchenko–Pastur edge for M samples in N ≈ d²/2 dimensions. Over 5 draws for each setting:
+
+| d | M | max B₀ | (1 + √(2M)/d)² | proved bound (η = 0.01) | full-space B ≈ 1 + M/d |
+|---|---|---|---|---|---|
+| 32 | 512 | 3.86 | 4.00 | 11.5 | 17 |
+| 64 | 256 | 1.84 | 1.83 | 12.9 | 5 |
+| 64 | 2048 | 3.95 | 4.00 | 12.9 | 33 |
+| 128 | 2048 | 2.23 | 2.25 | 14.3 | 17 |
+
+**(c) Random sign channels: the sharp edge.** Let s_a = x_a/√d with x_1…x_M independent and uniform on {±1}^d. As
+d → ∞ with M/d² → α ∈ (0, ∞), almost surely
+
+  B₀ → (1 + √(2α))².
+
+So for large d, B₀ ≈ (1 + √(2M)/d)², and every set of gates on distinct channels from the dictionary satisfies
+m ≤ (1 + o(1))·(1 + √(2M)/d)²·d²/(p_min(1−p_min)γ²). For M ≤ d²/2 the factor is at most 4.
+
+*Proof.* Let X₂ be the M × C(d,2) matrix with entries [X₂]_{a,{k<l}} = x_{ak}x_{al}. Since x_{ak}² = 1,
+(x_a·x_b)² = d + 2Σ_{k<l} x_{ak}x_{al}x_{bk}x_{bl}. So for a ≠ b, (s_a·s_b)² − 1/d = 2[X₂X₂ᵀ]_{ab}/d². On the
+diagonal, 1 − 1/d = 2C(d,2)/d². Hence the Gram matrix of the y_a is exactly (2/d²)X₂X₂ᵀ.
+
+Kogan, Nandy and Huang (arXiv:2410.17515, Theorem 1.2, case d = ℓ = 2, in their notation n = M, p = d) study
+R₂ = X₂X₂ᵀ/√(M d²) for i.i.d. entries with mean 0, variance 1 and E|x|^k ≤ k^{βk}. ±1 signs satisfy this. Their result:
+λ_max(R₂ − diag R₂) → 2/√2! + √α = √2 + √α almost surely, both for M ≤ C(d,2) and for M > C(d,2).
+
+Since diag R₂ = (d−1)/(2√M)·I,
+
+  (2/d²)X₂X₂ᵀ = (1 − 1/d)·I + (2√M/d)·(R₂ − diag R₂),
+
+and 2√M/d → 2√α. So B₀ → 1 + 2√α(√2 + √α) = (1 + √(2α))². ∎
+
+This is asymptotic: the theorem gives no rate in d. Bound (b) remains the finite-d guarantee, and its proof works the
+same way for sign channels, with E[yyᵀ] ⪯ (2/d²)·Id_V, so 2e²M/d² replaces 2e²M/(d(d+2)). Uniform-sphere channels are not covered by (c), since their
+coordinates are not independent. They give the same edge in simulation (largest of 3 draws per setting):
+
+| d | M/d² | (1 + √(2M)/d)² | B₀, sign channels | B₀, sphere channels |
+|---|---|---|---|---|
+| 64 | 1/2 | 4.000 | 3.979 | 3.918 |
+| 128 | 1/4 | 2.914 | 2.908 | 2.884 |
+| 128 | 1/2 | 4.000 | 3.980 | 3.956 |
+| 256 | 1/16 | 1.832 | 1.826 | 1.824 |
+| 256 | 1/4 | 2.914 | 2.905 | 2.902 |
+
+So up to M ≈ d²/2 random channels cost at most about 4× as much as perpendicular ones, instead of M/d times as much.
+
+What (b) and (c) do not give: trained models do not draw their channels uniformly at random. For a given model, B₀ is
+computable exactly from its channels, as λ_max([(s_a·s_b)² − 1/d]). As before, the count is of *distinct channels*:
+many openers on one channel can share its variance.
+
 ### Theorem 7 (linear budget across gates)
 
 Every gate (E, s) with prevalence p and contrast A satisfies
@@ -427,6 +514,33 @@ anatomy, run-opener and greedy sets, except two greedy sets near threshold. The 
 
 **Not done.** The Lipschitz-in-θ neighbourhood bound was not attempted.
 
+### 3.9b Frame bounds of the trained channels (Theorem 5″)
+
+All 26 runs were redone with γ = 10, 15, 25, 50, 100. The γ = 25 and 50 counts reproduce exactly. The noise floor
+from random openers is d·‖M‖ ≈ 3–9, so γ = 10 sits just above it. Each row is the range over the 24 one-layer models
+(widths 32–8192, AdamW and Muon, GELU/ReLU/ReLU²) and gelu_2l:
+
+| γ | channels m | B | B₀ | B₀ of m random channels | k_eff | m/B₀ |
+|---|---|---|---|---|---|---|
+| 10 | 41–139 | 3.3–8.4 | 3.3–8.2 | 1.04–1.07 | 13–18 | 12–18 |
+| 15 | 10–39 | 1.4–4.3 | 1.4–4.3 | 1.02–1.03 | 6–12 | 6–11 |
+
+k_eff = (tr F)²/‖F‖²_F with F = Σ_a s_a s_aᵀ is the effective dimension of the span of the channels.
+
+* **B₀ ≈ B.** With m ≪ d, the shared I/d part that B₀ removes is only about m/d.
+* **The channels are confined, not duplicated.** They fill a subspace of dimension k_eff ≈ 15 at γ = 10, the same
+  for every width from 32 to 8192, both optimizers, all three activations and the two-layer model. The top k_eff
+  directions carry 82–94% of F. Inside that subspace they are spread like random channels: B₀ is at or a little below the
+  value for m random unit vectors in the same subspace (≈ 1 + m/k_eff): within 10% at γ = 10, and up to 40% below at
+  γ = 15, where m is small. Few pairs are near-duplicates.
+* **What this does to the bound.** In a k-dimensional subspace, B₀ ≈ 1 + m/k grows with m. One change in how much of
+  the row's sensitivity lies in the subspace registers in every channel inside it. So m·c ≤ B₀κ constrains m only
+  when c > κ/k. Here c = p(1−p)γ²/d² ≈ 3·10⁻⁵ at γ = 10 and κ/k ≈ 0.01, so the theorem does not limit how many
+  channels fit inside the subspace. That is correct, not slack: one opener that raises the subspace's total share
+  opens all its directions at once.
+* **m/B₀ ≈ k_eff.** For m ≫ k, m/B₀ ≈ m/(1 + m/k) ≈ k. The robust number in the trained models is therefore the
+  dimension, about 15, of the gated subspace, not the channel count, which grows as γ falls.
+
 ### 3.10 Verdict
 
 1. **The theorem is true.** Lemma 2, Theorems 3 and 3′, Proposition 1 and Theorem 5 are proved above, and Theorem 5
@@ -564,9 +678,13 @@ training finds useful is. Neither the theory nor these experiments identify that
 * Proposition 1;
 * the fingerprint `P = GᵀG/‖G‖²_F` being positive with trace 1;
 * Theorem 7 with its count `m ≤ B·d/(p_min γ)`;
-* Theorem 5 (a) and (c), `κ ≤ 1`, and `κ ≤ 1 − 1/d` when every row has a nonzero gradient. Together these give the gate bound for actual fingerprints: with orthonormal
-  channels, at most `d² / (p(1-p)·γ²)` gates, for any model, data and width (`gate_count_orthonormal`);
+* Theorem 5 (a) and (c), `κ ≤ 1`, and `κ ≤ 1 − 1/d` when every row has a nonzero gradient. Together these give the
+  gate bound for actual fingerprints, for any model, data and width: with orthonormal channels, at most
+  `d² / (p(1-p)·γ²)` gates (`gate_count_orthonormal`; informative only when this is below `d`), and with overlapping
+  channels `m·p(1-p)γ²/d² ≤ B₀·κ`, where `B₀` is the frame bound on trace-zero matrices (Theorem 5″(a),
+  `gate_count_traceless`);
 * the width results: the inertia count, and the result that `m` bilinear gates need exactly `2m` neurons.
 
 `mode_bound_lean/README.md` maps each result to its Lean theorem and lists what is not formalized: Theorem 4, the
-spectral forms (5 (b), 5′), and Proposition 6 for general activations.
+spectral forms (5 (b), 5′), the random-channel bounds 5″(b), (c) (like Theorem 4, they need random-matrix results that Mathlib lacks), and
+Proposition 6 for general activations.
