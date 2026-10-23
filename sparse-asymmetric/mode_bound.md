@@ -564,7 +564,8 @@ training finds useful is. Neither the theory nor these experiments identify that
 * Proposition 1;
 * the fingerprint `P = GᵀG/‖G‖²_F` being positive with trace 1;
 * Theorem 7 with its count `m ≤ B·d/(p_min γ)`;
-* Theorem 5 (a) and (c);
+* Theorem 5 (a) and (c), and `κ ≤ 1`. Together these give the gate bound for actual fingerprints: with orthonormal
+  channels, at most `d² / (p(1-p)·γ²)` gates, for any model, data and width (`gate_count_orthonormal`);
 * the width results: the inertia count, and the result that `m` bilinear gates need exactly `2m` neurons.
 
 `mode_bound_lean/README.md` maps each result to its Lean theorem and lists what is not formalized: Theorem 4, the
