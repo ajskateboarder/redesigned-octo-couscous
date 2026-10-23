@@ -10,6 +10,8 @@ actual fingerprints `P_ρ = GᵀG / ‖G‖²_F` of `Budget.lean`, with the Frob
 
 * `hsSq_fingerprint_le_one`: every fingerprint has `‖P‖²_F ≤ 1` (Cauchy–Schwarz and Parseval; no spectral theorem).
 * `kappa_le_one`: the total variation of fingerprints across rows, `κ = E‖P - P̄‖²_F`, is at most `1`.
+* `kappa_le_one_sub`: if every row has a nonzero gradient, `κ ≤ 1 - 1/d`: the mean fingerprint has trace `1`, so
+  `‖P̄‖²_F ≥ 1/d` (`trace_sq_le_hsSq`), and that part of the unit budget is spent on the mean, not on variation.
 * `sum_sq_inner_le_hsSq`: orthonormal channels `sₐ` have frame bound `1`: `Σₐ (sₐᵀ D sₐ)² ≤ ‖D‖²_F` for symmetric `D`.
 * `gate_count_fingerprint`: gates `(eₐ, sₐ)` with `p(1-p) ≥ c` and `|E[qₐ | on] - E[qₐ | off]| ≥ δ`, `qₐ = sₐᵀPsₐ`,
   satisfy `m · c · δ² ≤ B·κ ≤ B`, where `B` is the channels' frame bound in the Frobenius sense.
@@ -108,8 +110,9 @@ theorem meanFP_isSymmetric : (meanFP μ g).IsSymmetric := by
   simp only [meanFP, LinearMap.sum_apply, LinearMap.smul_apply, sum_inner, inner_sum, real_inner_smul_left,
     real_inner_smul_right, (fingerprint_isPositive _).isSymmetric _ _]
 
-/-- **`κ ≤ 1`**: fingerprints vary across rows by at most `1` in total. -/
-theorem kappa_le_one (hμ : ∀ ρ, 0 ≤ μ ρ) (hsum : ∑ ρ, μ ρ = 1) : kappa μ g ≤ 1 := by
+/-- `κ = E‖P‖²_F - ‖P̄‖²_F`. -/
+theorem kappa_eq (hsum : ∑ ρ, μ ρ = 1) :
+    kappa μ g = ∑ ρ, μ ρ * hsSq (fingerprint (g ρ)) - hsSq (meanFP μ g) := by
   set P := fun ρ => fingerprint (g ρ)
   set Pbar := meanFP μ g
   have hexp : ∀ ρ, hsSq (P ρ - Pbar) =
@@ -129,16 +132,55 @@ theorem kappa_le_one (hμ : ∀ ρ, 0 ≤ μ ρ) (hsum : ∑ ρ, μ ρ = 1) : ka
       simp_rw [mul_smul_comm]
     rw [hsSq, ← h, map_sum]
     simp [map_smul, smul_eq_mul]
-  have hκ : kappa μ g = ∑ ρ, μ ρ * hsSq (P ρ) - hsSq Pbar := by
-    change ∑ ρ, μ ρ * hsSq (P ρ - Pbar) = _
-    simp only [hexp, mul_add, mul_sub, sum_add_distrib, sum_sub_distrib, hleft, hright, ← sum_mul, hsum]
-    ring
-  rw [hκ]
-  have h0 := hsSq_nonneg (meanFP_isSymmetric μ g)
-  have h1 : ∑ ρ, μ ρ * hsSq (P ρ) ≤ ∑ ρ, μ ρ * 1 :=
+  change ∑ ρ, μ ρ * hsSq (P ρ - Pbar) = _
+  simp only [hexp, mul_add, mul_sub, sum_add_distrib, sum_sub_distrib, hleft, hright, ← sum_mul, hsum]
+  ring
+
+theorem sum_hsSq_fingerprint_le (hμ : ∀ ρ, 0 ≤ μ ρ) (hsum : ∑ ρ, μ ρ = 1) :
+    ∑ ρ, μ ρ * hsSq (fingerprint (g ρ)) ≤ 1 := by
+  have h1 : ∑ ρ, μ ρ * hsSq (fingerprint (g ρ)) ≤ ∑ ρ, μ ρ * 1 :=
     sum_le_sum fun ρ _ => mul_le_mul_of_nonneg_left (hsSq_fingerprint_le_one (g ρ)) (hμ ρ)
-  rw [← sum_mul, hsum, one_mul] at h1
-  linarith
+  rwa [← sum_mul, hsum, one_mul] at h1
+
+/-- **`κ ≤ 1`**: fingerprints vary across rows by at most `1` in total. -/
+theorem kappa_le_one (hμ : ∀ ρ, 0 ≤ μ ρ) (hsum : ∑ ρ, μ ρ = 1) : kappa μ g ≤ 1 := by
+  rw [kappa_eq μ g hsum]
+  linarith [hsSq_nonneg (meanFP_isSymmetric μ g), sum_hsSq_fingerprint_le μ g hμ hsum]
+
+/-- `(tr D)² ≤ d·‖D‖²_F`: Cauchy–Schwarz against the identity. -/
+theorem trace_sq_le_hsSq {D : E →ₗ[ℝ] E} (hD : D.IsSymmetric) :
+    LinearMap.trace ℝ E D ^ 2 ≤ finrank ℝ E * hsSq D := by
+  set b := stdOrthonormalBasis ℝ E
+  have htr : LinearMap.trace ℝ E D = ∑ i, ⟪D (b i), b i⟫ := by
+    rw [LinearMap.trace_eq_sum_inner _ b]
+    exact sum_congr rfl fun i _ => real_inner_comm _ _
+  have h := sq_sum_le_card_mul_sum_sq (s := univ) (f := fun i => ⟪D (b i), b i⟫)
+  rw [card_univ, Fintype.card_fin, ← htr] at h
+  exact h.trans (mul_le_mul_of_nonneg_left (sum_sq_inner_le_hsSq hD b.orthonormal) (Nat.cast_nonneg _))
+
+/-- If every row has a nonzero gradient, the mean fingerprint has trace `1`. -/
+theorem trace_meanFP (hsum : ∑ ρ, μ ρ = 1) (hg : ∀ ρ, ∑ k, ‖g ρ k‖ ^ 2 ≠ 0) :
+    LinearMap.trace ℝ E (meanFP μ g) = 1 := by
+  simp [meanFP, map_sum, trace_fingerprint _ (hg _), hsum]
+
+/-- **`κ ≤ 1 - 1/d`**: if every row has a nonzero gradient, the mean fingerprint has `‖P̄‖²_F ≥ 1/d` (its trace is
+`1`), so less than the whole unit budget is available for variation. -/
+theorem kappa_le_one_sub (hμ : ∀ ρ, 0 ≤ μ ρ) (hsum : ∑ ρ, μ ρ = 1) (hg : ∀ ρ, ∑ k, ‖g ρ k‖ ^ 2 ≠ 0) :
+    kappa μ g ≤ 1 - 1 / finrank ℝ E := by
+  have hd : (0 : ℝ) < finrank ℝ E := by
+    have h := trace_sq_le_hsSq (meanFP_isSymmetric μ g)
+    rw [trace_meanFP μ g hsum hg] at h
+    rcases (Nat.cast_nonneg (α := ℝ) (finrank ℝ E)).eq_or_lt with h0 | h0
+    · rw [← h0] at h
+      norm_num at h
+    · exact h0
+  have hP : 1 / finrank ℝ E ≤ hsSq (meanFP μ g) := by
+    have h := trace_sq_le_hsSq (meanFP_isSymmetric μ g)
+    rw [trace_meanFP μ g hsum hg, one_pow] at h
+    rw [div_le_iff₀ hd]
+    linarith
+  rw [kappa_eq μ g hsum]
+  linarith [sum_hsSq_fingerprint_le μ g hμ hsum]
 
 /-! ### Gate bound -/
 
