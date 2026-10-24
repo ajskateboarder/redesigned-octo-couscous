@@ -1,5 +1,5 @@
-import ModeBoundLean.GateSpace
-import ModeBoundLean.Prob
+import GateBoundLean.GateSpace
+import GateBoundLean.Prob
 
 /-!
 # Trace budgets (Proposition 1 and Theorem 7)
@@ -22,7 +22,7 @@ set_option linter.unusedSectionVars false
 
 noncomputable section
 
-namespace ModeBound
+namespace GateBound
 
 variable {E : Type*} [NormedAddCommGroup E] [InnerProductSpace ℝ E] [FiniteDimensional ℝ E]
 
@@ -209,6 +209,6 @@ theorem frame_of_orthonormal {ι : Type*} [Fintype ι] {s : ι → E} (hs : Orth
     ∑ a, ⟪s a, x⟫ ^ 2 ≤ 1 * ‖x‖ ^ 2 := by
   simpa [sq_abs] using hs.sum_inner_products_le (x := x) (s := univ)
 
-end ModeBound
+end GateBound
 
 end

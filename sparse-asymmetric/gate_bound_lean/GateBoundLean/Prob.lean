@@ -13,7 +13,7 @@ open Finset
 
 noncomputable section
 
-namespace ModeBound
+namespace GateBound
 
 variable {Ω : Type*} [Fintype Ω] (μ : Ω → ℝ)
 
@@ -40,6 +40,6 @@ theorem condMean_real (e : Ω → Prop) [DecidablePred e] (q : Ω → ℝ) :
     condMean μ e q = (∑ ρ ∈ univ.filter e, μ ρ * q ρ) / mass μ e := by
   simp [condMean, smul_eq_mul, div_eq_inv_mul]
 
-end ModeBound
+end GateBound
 
 end

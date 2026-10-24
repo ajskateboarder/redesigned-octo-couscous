@@ -1,10 +1,10 @@
-import ModeBoundLean.Variance
+import GateBoundLean.Variance
 
 /-!
 # The gated subspace (Theorem 8): containment, counting, and the spiked–incoherent class
 
 Rows `ρ` carry operators `P ρ` (fingerprints, or anything else), and an opener event `e` has matrix
-`M = E[P | on] - E[P | off]`. A *gate mode* at level `t` is an eigenvector `M s = λ s` with `λ ≥ t`. Fix any subspace `V`
+`M = E[P | on] - E[P | off]`. A *gate direction* at level `t` is an eigenvector `M s = λ s` with `λ ≥ t`. Fix any subspace `V`
 and write `w = s - Π_V s`.
 
 * `containment`: if `⟪M w, w⟫ ≤ τ⊥‖w‖²` on `Vᗮ` (outside capacity) and `⟪M v, w⟫ ≤ τ×‖v‖‖w‖` for `v ∈ V`, `w ∈ Vᗮ`
@@ -16,9 +16,9 @@ and write `w = s - Π_V s`.
   event (Theorem 5 (a)). This turns variance bounds into capacities.
 * `spiked_containment`, `spiked_count`: **the spiked–incoherent class.** If every row splits as `P = S + N` with `S`
   living on `V` and `N`'s quadratic and bilinear forms off `V` of variance at most `σ⊥²‖w‖⁴` and `σ×²‖v‖²‖w‖²`, then every
-  gate mode at level `t > τ⊥ := σ⊥/√(p(1-p))` has at most `ε = τ×² / (τ×² + (t - τ⊥)²)` of its mass off `V`
-  (`τ× := σ×/√(p(1-p))`), and gate modes with frame bound `B` number at most `B·dim V / (1 - ε)`, whatever the events.
-  For an isotropic remainder `N`, `σ⊥, σ×` are `O(1/d)` (mode_bound.md, Theorem 8 (c)), so `τ⊥, τ×` are `O(1)` in contrast
+  gate direction at level `t > τ⊥ := σ⊥/√(p(1-p))` has at most `ε = τ×² / (τ×² + (t - τ⊥)²)` of its mass off `V`
+  (`τ× := σ×/√(p(1-p))`), and gate directions with frame bound `B` number at most `B·dim V / (1 - ε)`, whatever the events.
+  For an isotropic remainder `N`, `σ⊥, σ×` are `O(1/d)` (gate_bound.md, Theorem 8 (c)), so `τ⊥, τ×` are `O(1)` in contrast
   units: only the `dim V` coherent directions can carry gates.
 * `concentratedCount`, `card_le_concentratedCount` (**Corollary 8.1**): orthonormal gates number at most `N_c`, the largest
   number of orthonormal directions whose own channel quantity has variance `≥ c·δ²`. This sharpens the count of
@@ -32,7 +32,7 @@ set_option linter.unusedSectionVars false
 
 noncomputable section
 
-namespace ModeBound
+namespace GateBound
 
 variable {E : Type*} [NormedAddCommGroup E] [InnerProductSpace ℝ E] [FiniteDimensional ℝ E]
 
@@ -142,7 +142,7 @@ theorem inner_condMean_apply (e : Ω → Prop) [DecidablePred e] (P : Ω → E �
 
 /-- **The spiked–incoherent class, one gate.** Rows split as `P = S + N`, where `S` lives on `V`
 (`⟪S x, y⟫ = 0` if `x` or `y` is in `Vᗮ`) and the remainder `N` has `Var ⟪N w, w⟫ ≤ σ⊥²‖w‖⁴` for `w ∈ Vᗮ` and
-`Var ⟪N v, w⟫ ≤ σ×²‖v‖²‖w‖²` for `v ∈ V`, `w ∈ Vᗮ`. Then every gate mode `M s = λ s` of any event, with
+`Var ⟪N v, w⟫ ≤ σ×²‖v‖²‖w‖²` for `v ∈ V`, `w ∈ Vᗮ`. Then every gate direction `M s = λ s` of any event, with
 `λ > τ⊥ = σ⊥/√(p(1-p))`, has `((λ - τ⊥)² + τ×²)·‖s - Π_V s‖² ≤ τ×²‖s‖²`, `τ× = σ×/√(p(1-p))`. -/
 theorem spiked_containment (hμ : ∀ ρ, 0 ≤ μ ρ) (hsum : ∑ ρ, μ ρ = 1) (P S N : Ω → E →ₗ[ℝ] E)
     (V : Submodule ℝ E) (hPSN : ∀ ρ, P ρ = S ρ + N ρ) (hS : ∀ ρ x y, (x ∈ Vᗮ ∨ y ∈ Vᗮ) → ⟪S ρ x, y⟫ = 0)
@@ -179,7 +179,7 @@ theorem spiked_containment (hμ : ∀ ρ, 0 ≤ μ ρ) (hsum : ∑ ρ, μ ρ = 1
       _ = σx / c * (‖v‖ * ‖w‖) := by ring
 
 /-- **The spiked–incoherent class, counted.** In the setting of `spiked_containment`, take unit channels `sₐ` with frame
-bound `B`, each a gate mode `Mₐ sₐ = λₐ sₐ` of its own event `eₐ` (prevalence `p`) with `λₐ ≥ t > τ⊥`. Then
+bound `B`, each a gate direction `Mₐ sₐ = λₐ sₐ` of its own event `eₐ` (prevalence `p`) with `λₐ ≥ t > τ⊥`. Then
 `m·(1 - ε) ≤ B·dim V` with `ε = τ×² / (τ×² + (t - τ⊥)²)`: however the gates are implemented and whatever their events,
 only `V`'s directions can carry them. -/
 theorem spiked_count (hμ : ∀ ρ, 0 ≤ μ ρ) (hsum : ∑ ρ, μ ρ = 1) (P S N : Ω → E →ₗ[ℝ] E)
@@ -253,6 +253,6 @@ theorem card_le_concentratedCount (hμ : ∀ ρ, 0 ≤ μ ρ) (hsum : ∑ ρ, μ
   rw [← hcard]
   exact le_csSup hbdd ⟨T, rfl, hT, hvar⟩
 
-end ModeBound
+end GateBound
 
 end

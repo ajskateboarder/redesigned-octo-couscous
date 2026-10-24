@@ -3,11 +3,11 @@ import Mathlib
 /-!
 # Gate spaces
 
-`mode_bound.md` counts *gate modes*: eigenvalues `λ ≥ t` (with `t = γ/d`) of a symmetric operator `M`, the opener's
+`gate_bound.md` counts *gate directions*: eigenvalues `λ ≥ t` (with `t = γ/d`) of a symmetric operator `M`, the opener's
 mean-difference matrix. Every bound in this formalization is proved for *gate spaces* instead: subspaces `V` on which
 the quadratic form satisfies `⟪M x, x⟫ ≥ t‖x‖²`. The eigenvectors with eigenvalue `≥ t` span a gate space of exactly
-that dimension (`exists_gateSpace_eigen`), so any bound on the dimension of gate spaces bounds the number of gate modes
-(`card_eigen_le`). Modes that close (`λ ≤ -t`) are the gate modes of `-M`, i.e. `σ = -1` below.
+that dimension (`exists_gateSpace_eigen`), so any bound on the dimension of gate spaces bounds the number of gate directions
+(`card_eigen_le`). Gate directions that close (`λ ≤ -t`) are the gate directions of `-M`, i.e. `σ = -1` below.
 
 `finrank_le_of_pos` is the dimension count behind the rank lemma, Theorems 3 and 3′, and the width bound: a subspace on
 which a quadratic quantity is positive cannot meet the kernel of a map on whose kernel that quantity is `≤ 0`.
@@ -16,7 +16,7 @@ which a quadratic quantity is positive cannot meet the kernel of a map on whose 
 open Module Submodule
 open scoped InnerProductSpace RealInnerProductSpace
 
-namespace ModeBound
+namespace GateBound
 
 variable {E : Type*} [NormedAddCommGroup E] [InnerProductSpace ℝ E] [FiniteDimensional ℝ E]
 
@@ -42,7 +42,7 @@ theorem finrank_le_of_pos {G : Type*} [AddCommGroup G] [Module ℝ G] (Q : E →
   omega
 
 /-- The eigenvectors of a symmetric `T` with `σ·λ ≥ t` span a gate space of `σ • T` at level `t` whose dimension is the
-number of such eigenvalues (`σ = 1`: modes that open; `σ = -1`: modes that close). -/
+number of such eigenvalues (`σ = 1`: gate directions that open; `σ = -1`: gate directions that close). -/
 theorem exists_gateSpace_eigen {T : E →ₗ[ℝ] E} (hT : T.IsSymmetric) {n : ℕ} (hn : finrank ℝ E = n) (σ t : ℝ) :
     ∃ V : Submodule ℝ E, IsGateSpace (σ • T) t V ∧
       finrank ℝ V = (Finset.univ.filter fun i => t ≤ σ * hT.eigenvalues hn i).card := by
@@ -72,7 +72,7 @@ theorem card_eigen_le {T : E →ₗ[ℝ] E} (hT : T.IsSymmetric) {n : ℕ} (hn :
   exact hd ▸ h V hV
 
 /-- **Theorem 3′** (compression form). If the quadratic forms of `M` and `R` agree on `ker L`, every gate space `V` of
-`M` has dimension at most `rank L + dim (V ⊓ ker L)`, and `V ⊓ ker L` is a gate space of `R`: every mode beyond
+`M` has dimension at most `rank L + dim (V ⊓ ker L)`, and `V ⊓ ker L` is a gate space of `R`: every gate direction beyond
 `rank L` is carried by `R` on `ker L`. -/
 theorem gateSpace_compression {G : Type*} [AddCommGroup G] [Module ℝ G] (M R : E →ₗ[ℝ] E) (L : E →ₗ[ℝ] G)
     (hL : ∀ x, L x = 0 → ⟪M x, x⟫ = ⟪R x, x⟫) {t : ℝ} {V : Submodule ℝ E} (hV : IsGateSpace M t V) :
@@ -101,4 +101,4 @@ theorem gateSpace_finrank_le {G : Type*} [AddCommGroup G] [Module ℝ G] (M R : 
   rw [this, finrank_bot] at hle
   omega
 
-end ModeBound
+end GateBound

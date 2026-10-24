@@ -1,4 +1,4 @@
-import ModeBoundLean.GateBound
+import GateBoundLean.GateBound
 
 /-!
 # Sharper gate budgets (Theorems 7′ and 7*), and the sharpness of Theorem 7
@@ -30,7 +30,7 @@ set_option linter.unusedSectionVars false
 
 noncomputable section
 
-namespace ModeBound
+namespace GateBound
 
 variable {E : Type*} [NormedAddCommGroup E] [InnerProductSpace ℝ E] [FiniteDimensional ℝ E]
 
@@ -352,6 +352,6 @@ theorem linear_budget_sharp {r j : ℕ} (hr : 0 < r) (hj : 0 < j) (b : Fin r × 
   simp only [Finset.filter_eq', mem_univ, ite_true, sum_singleton]
   field_simp
 
-end ModeBound
+end GateBound
 
 end

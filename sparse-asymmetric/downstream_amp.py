@@ -40,7 +40,7 @@ Further checks on a saved run (each rebuilds this script's rows from the run's s
     amp_pc_sparsity.py   whether sparse (transcoder) features lean on low-variance PCs (GPT-2 only)
     amp_transcoder.py    transcoder features as openers, and how attractor on-sets relate to them (GPT-2 only)
     amp_basis_alignment.py  (no run needed) how basis-aligned each model's MLP input is, across activations and optimizers
-    amp_mode_bound.py    the dense-gate mode bound (mode_bound.md) on MLPs followed only by the readout; amp_mode_bound.sh
+    amp_gate_bound.py    the dense-gate bound (gate_bound.md) on MLPs followed only by the readout; amp_gate_bound.sh
                          reruns it with the d_mlp scaling / robustness models from amp_mlp_width.py
     amp_gate_capacity.py (no run needed) planted gates: how many a width-H MLP can store (amp_gate_capacity.sh)
 bash amp_checks.sh reruns all of them on the saved runs; logs go to downstream_amp/checks/.

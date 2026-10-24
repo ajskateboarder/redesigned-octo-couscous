@@ -1,4 +1,4 @@
-"""How tight are Theorems 5 and 7 (mode_bound.md) on a trained model? Both bound gates (E, s) over *arbitrary* events E of
+"""How tight are Theorems 5 and 7 (gate_bound.md) on a trained model? Both bound gates (E, s) over *arbitrary* events E of
 prevalence p. For a fixed channel s the best such event is the top-p rows of q_s = sᵀPs, since
 p(1-p)·(E[q | E] - E[q | Eᶜ]) = E[q 1_E] - p E[q] is maximised at fixed mass by the largest q. So the largest number of
 orthonormal gates at contrast ≥ γ that the model's fingerprints admit can be searched for directly:
@@ -14,10 +14,10 @@ orthonormal gates at contrast ≥ γ that the model's fingerprints admit can be 
     opener class       for each self-gate channel, the best contrast from a single-neuron opener (top p of u_i) and
                        from a halfspace opener (top p of o·z, o the regression direction of q_s on whitened z)
 
-MLPs followed only by the readout (gelu_1l --layer 0, gelu_2l --layer 1), where G_ρ is exact (as in amp_mode_bound.py).
+MLPs followed only by the readout (gelu_1l --layer 0, gelu_2l --layer 1), where G_ρ is exact (as in amp_gate_bound.py).
 
 Usage: python amp_bound_tightness.py <run .pt> [--gamma 25,50,100] [--starts 32] [--max-channels 400]
-Output: downstream_amp/checks/amp_bound_tightness_<run>.log, downstream_amp/mode_bound/tightness_<run>.pt
+Output: downstream_amp/checks/amp_bound_tightness_<run>.log, downstream_amp/gate_bound/tightness_<run>.pt
 """
 import argparse
 import math
@@ -97,7 +97,7 @@ def mean_slope(R):
 
 
 def fingerprints(R, Qbar=None, Dbar=None):
-    # P_ρ = GᵀG / ‖G‖²_F as in amp_mode_bound.py (or the frozen-readout P̃_ρ), rows flattened to D² entries; also u and x
+    # P_ρ = GᵀG / ‖G‖²_F as in amp_gate_bound.py (or the frozen-readout P̃_ρ), rows flattened to D² entries; also u and x
     x, r, p, idx = rows(R)
     X = torch.empty(len(x), D * D, device=dev)
     for s in range(0, len(x), cli.batch):
@@ -268,9 +268,9 @@ for a in range(min(12, m_all)):
           f"{(top5.T @ Sf[:, a]).square().sum():.2f}")
 
 REF = f"tightness{BASE}_{path.stem}.pt" if cli.freeze != "none" else f"tightness_{path.stem}.pt"
-if TAG and (RUNS / "mode_bound" / REF).exists():
+if TAG and (RUNS / "gate_bound" / REF).exists():
     # same gates? the reference channels' self-gate contrast under these fingerprints, and the overlap of the two sets
-    real = torch.load(RUNS / "mode_bound" / REF)
+    real = torch.load(RUNS / "gate_bound" / REF)
     Sr = real["channels"].to(dev)
     qr = gains(X, Sr)
     onr = top_event(qr)
@@ -282,7 +282,7 @@ if TAG and (RUNS / "mode_bound" / REF).exists():
     print(f"   best |cos| of each reference channel with a channel here: {np.round(cos.max(1).values.cpu().numpy(), 2).tolist()}")
     print(f"   principal cosines between the two channel spans: {np.round(sv.cpu().numpy(), 2).tolist()}")
 
-out = RUNS / "mode_bound"
+out = RUNS / "gate_bound"
 out.mkdir(exist_ok=True)
 torch.save({"args": vars(cli), "model": S_.args.model, "d": D, "H": H, "kappa": kappa, "purity": purity, "evP": evP.cpu(),
             "lamK": lamK[:2048].cpu(), "evA": {th: e.cpu() for th, e in evA.items()}, "channels": Sf.cpu(), "A_self": A_self.cpu(), "A_held": A_held.cpu(),

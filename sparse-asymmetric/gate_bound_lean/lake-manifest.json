@@ -91,6 +91,6 @@
    "inputRev": "v4.35.0",
    "inherited": true,
    "configFile": "lakefile.toml"}],
- "name": "mode_bound_lean",
+ "name": "gate_bound_lean",
  "lakeDir": ".lake",
  "fixedToolchain": false}

@@ -1,4 +1,4 @@
-"""Dense-gate mode bound (mode_bound.md): checks of the rank lemma, the per-opener and total gate-count bounds, on a saved
+"""Dense-gate bound (gate_bound.md): checks of the rank lemma, the per-opener and total gate-count bounds, on a saved
 run's rows, for an MLP followed only by the readout (gelu_1l --layer 0, gelu_2l --layer 1), where G_ρ is exact.
 
     G_ρ = C_ρ^½ J_ρ Σ^½ = F_ρ Wᵀ     W = Σ^½ W_in (D × H), column i: neuron i's whitened read direction w_i
@@ -6,20 +6,20 @@ run's rows, for an MLP followed only by the readout (gelu_1l --layer 0, gelu_2l 
                                      C_ρ = ½(diag p - p pᵀ) (so ‖G_ρ s‖² is downstream_amp.py's gain of s)
     P_ρ = G_ρᵀG_ρ / Z_ρ, Z_ρ = ‖G_ρ‖²_F           fingerprint (tr P = 1); d·sᵀP s is g(s)/τ with τ exact
     opener S (k neurons)  on = top --tail of rows by Σ_{i∈S} standardised pre-activation u_i (threshold from fitting rows)
-    M_S = E[P | on] - E[P | off]                   gate mode: eigenvalue λ with d·|λ| ≥ γ (contrast units)
+    M_S = E[P | on] - E[P | off]                   gate direction: eigenvalue λ with d·|λ| ≥ γ (contrast units)
     E_S = Δ E[G_RᵀG_R / Z], G_R = G - F_S W_Sᵀ     what is left of M_S once every term touching w_S is removed
     Q_S                                            projector off span(w_S); Q M Q = Q E Q
-Bounds checked (numbers as in mode_bound.md):
+Bounds checked (numbers as in gate_bound.md):
     Prop 1   per opener, unconditional: N_±(γ) ≤ d·Σ_±λ / γ ≤ d/γ (positive part of M has trace ≤ 1)
     Thm 3/3' per opener: N_±(γ) ≤ r + N_±(Q M Q, γ), r = rank w_S; so ≤ r if ‖Q M Q‖ < γ/d (implied by ‖E_S‖ < γ/d)
     Thm 5    all gates: m · p(1-p)(γ/d)² ≤ B · Σ_{i≤m} λ_i(K), K the covariance of P, B the frame bound of {s_a s_aᵀ}
-Steps (mode_bound.md §3): 1 kernel spectrum; 2 ‖E_S‖, ‖Q M Q‖ vs γ/d; 3 mode counts vs 2k; 4 read-direction overlap;
+Steps (gate_bound.md §3): 1 kernel spectrum; 2 ‖E_S‖, ‖Q M Q‖ vs γ/d; 3 gate-direction counts vs 2k; 4 read-direction overlap;
 5 Fisher-mass shares, principal angles, B; 6 nulls (random row events, random neuron sets); 9 held-out replication,
 window bootstrap, matrix-Bernstein radius. Openers: every single neuron, greedy k-neuron sets, the given sets, and the
 run's fitted openers o (event: top --tail of c(o)) split on the given sets.
 
-Usage: python amp_mode_bound.py <run .pt> [--sets 251,1608;251,1608,1942,690] [--opener-sets a0;a1;...] [--gamma 25,50,100]
-Output: downstream_amp/checks/amp_mode_bound_<run>.log, downstream_amp/mode_bound/<run>.pt
+Usage: python amp_gate_bound.py <run .pt> [--sets 251,1608;251,1608,1942,690] [--opener-sets a0;a1;...] [--gamma 25,50,100]
+Output: downstream_amp/checks/amp_gate_bound_<run>.log, downstream_amp/gate_bound/<run>.pt
 """
 import argparse
 import math
@@ -43,7 +43,7 @@ parser.add_argument("--boot", type=int, default=100, help="window-bootstrap resa
 parser.add_argument("--batch", type=int, default=32)
 cli = parser.parse_args()
 path, res, S_ = from_run(cli.run)
-log_to(f"amp_mode_bound_{path.stem}")
+log_to(f"amp_gate_bound_{path.stem}")
 torch.set_grad_enabled(False)
 Mo, L, dev, D, P_, FIRST, TOPK, tail = S_.M, S_.L, S_.dev, S_.D, S_.P_, S_.FIRST, S_.TOPK, S_.args.tail
 assert L == Mo.n_layer - 1, "G_ρ is computed in closed form: the MLP must be followed only by the readout"
@@ -235,9 +235,9 @@ for g in GAMMAS:
     nq = int(qual.sum())
     summary[g] = dict(openers1=nq, openers1_held=int((hpos > 0).sum()), Npos1_max=int(npos.max()), Nneg1_max=int(nneg.max()),
                       thm3_1=int((nE1[qual] < t).sum()), thm3q_1=int((qmq1[qual].abs().max(1).values < t).sum()))
-    msg = f"   γ = {g:g}: {nq} neurons open ≥ 1 mode (held-out: {int((hpos > 0).sum())})"
+    msg = f"   γ = {g:g}: {nq} neurons open ≥ 1 gate direction (held-out: {int((hpos > 0).sum())})"
     if nq:
-        msg += (f" | modes per opener N₊ max {int(npos.max())}, N₋ max {int(nneg.max())}, N₊ ≥ 2 for {int((npos >= 2).sum())} | "
+        msg += (f" | gate directions per opener N₊ max {int(npos.max())}, N₋ max {int(nneg.max())}, N₊ ≥ 2 for {int((npos >= 2).sum())} | "
                 f"Prop 1 budget d·Σ₊λ/γ max {(D * ev1.clamp_min(0).sum(1) / g)[qual].max():.1f} | "
                 f"Thm 3 (‖E_i‖ < γ/d) holds for {int((nE1[qual] < t).sum())}/{nq}, Thm 3' (‖QMQ‖ < γ/d) for "
                 f"{int((qmq1[qual].abs().max(1).values < t).sum())}/{nq} | N₊ ≤ 1 + N₊(QMQ) violated: "
@@ -305,7 +305,7 @@ for k, (_, S, _, _) in enumerate(sets):
 qmqS = torch.stack(qmqS)
 print(f"\nneuron-set openers (on = top {tail:g} of Σ_S standardised u; o*: the run's openers, S its top neurons)")
 print(f"   K_S = M - E_S, the part touching span(w_S) (rank ≤ 2k, ≤ k eigenvalues of each sign); overlap: max_j∉S ‖Π_S ŵ_j‖; "
-      f"top mode in span: ‖Π_S s₁‖")
+      f"top gate direction in span: ‖Π_S s₁‖")
 print(f"   kind   k  set                          d·λ₁  d·λ₂  d·Σ₊λ | ‖E_S‖·d ‖QMQ‖·d | d·λ(K_S) top 2, bottom 2 | overlap  in span | S mass on")
 for k, (kind, S, _, _) in enumerate(sets):
     if kind == "random" and k % 4:
@@ -335,15 +335,15 @@ for j in range(len(osets)):
     s = res["S"][:, reps[j]].to(dev)
     ev, vec = torch.linalg.eigh(Ms[k].double())
     print(f"   attractor {j} (S = {osets[j]}): d·sᵀMs {D * (s @ Ms[k] @ s):.1f} (pipeline held-out {res['checks'][j]['contrast']:.1f}); "
-          f"|cos(s, top mode)| {abs(vec[:, -1].float() @ s):.2f}; d·λ top-4 {np.round(D * ev.flip(0)[:4].cpu().numpy(), 1).tolist()}")
+          f"|cos(s, top gate direction)| {abs(vec[:, -1].float() @ s):.2f}; d·λ top-4 {np.round(D * ev.flip(0)[:4].cpu().numpy(), 1).tolist()}")
 
-# --- gates: (opener, mode) pairs with d·λ ≥ γ over single neurons and non-random sets; distinct channels (|cos| ≤ 0.8)
+# --- gates: (opener, direction) pairs with d·λ ≥ γ over single neurons and non-random sets; distinct channels (|cos| ≤ 0.8)
 chans = list(chans1)
 for k, (kind, S, _, _) in enumerate(sets):
     if kind != "random":
         ev, vec = torch.linalg.eigh(Ms[k].double())
         chans += [(ev[m].item(), vec[:, m].float(), kind if kind.startswith("o") else str(S), S) for m in torch.nonzero(ev >= tmin)[:, 0]]
-print(f"\ngates: positive modes with d·λ ≥ γ, openers = all single neurons + greedy, given and the run's openers")
+print(f"\ngates: positive gate directions with d·λ ≥ γ, openers = all single neurons + greedy, given and the run's openers")
 gate_sets, chan_S = {}, {}
 for g in GAMMAS:
     t = g / D
@@ -367,7 +367,7 @@ for g in GAMMAS:
     summary[g].update(pairs=len(cs), channels=len(best), B=B, B0=B0, thm5=thm5(c / B), thm5_kappa=kappa * B / c,
                       thm5_kappa0=kappa * B0 / c, thm5b=thm5b(c, B)[0])
     gate_sets[g] = [cs[q][3] for q in best]
-    print(f"   γ = {g:g}: {len(cs)} (opener, mode) pairs, {len(best)} distinct channels; frame bound B {B:.2f}, trace-zero B₀ {B0:.2f} "
+    print(f"   γ = {g:g}: {len(cs)} (opener, direction) pairs, {len(best)} distinct channels; frame bound B {B:.2f}, trace-zero B₀ {B0:.2f} "
           f"(random: {(1 + math.sqrt(2 * len(best)) / D) ** 2:.2f}); Thm 5: m ≤ "
           f"{thm5(c / B)} (spectral), ≤ {thm5b(c, B)[0]:.1f} (5'), ≤ {kappa * B / c:.1f} (κ), ≤ {kappa * B0 / c:.1f} (κ, B₀); Var(sᵀPs) / p(1-p)(γ/d)²: min {(varq / c).min():.2f}, "
           f"median {(varq / c).median():.2f}")
@@ -421,7 +421,7 @@ for name, on in picks:
           f"{D * evb[:, -2].std():.1f} | " + ", ".join(f"N₊({g:g}) 5-95% {int(count(evb, g / D)[0].float().quantile(.05))}-"
                                                        f"{int(count(evb, g / D)[0].float().quantile(.95))}" for g in GAMMAS))
 
-out = RUNS / "mode_bound"
+out = RUNS / "gate_bound"
 out.mkdir(exist_ok=True)
 torch.save({"args": vars(cli), "model": S_.args.model, "d": D, "H": H, "kappa": kappa, "lamK": lamK[:256].cpu(),
             "ev1": ev1.cpu(), "ev1h": ev1h.cpu(), "nE1": nE1.cpu(), "qmq1": qmq1.cpu(), "noise": eps.cpu(),

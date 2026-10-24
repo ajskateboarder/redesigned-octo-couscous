@@ -1,5 +1,5 @@
 """Planted-gate capacity: how many gates can a one-hidden-layer MLP of width H store, at input dimension d? The
-achievability side of mode_bound.md (§4), which bounds gate counts from above only.
+achievability side of gate_bound.md (§4), which bounds gate counts from above only.
 
 Teacher (ℝ^d → ℝ^d), inputs x ~ N(0, I_d) (so already whitened):
     f*(x) = Q x + α Σ_a σ((o_a·x - t)/T) (s_a·x) u_a
@@ -8,14 +8,14 @@ Teacher (ℝ^d → ℝ^d), inputs x ~ N(0, I_d) (so already whitened):
     of inputs, T = --sharp. Gate a: opener event E_a = {o_a·x > t}, channel s_a.
 Student: f(x) = W₂ φ(W₁x + b₁) + b₂, width H, GELU, no skip (as an MLP in the residual stream: all of its sensitivity
     has to pass through the neurons), trained by MSE on fresh Gaussian batches.
-Both are measured as amp_mode_bound.py measures a model, with the readout the identity (C = I): G = J(x),
+Both are measured as amp_gate_bound.py measures a model, with the readout the identity (C = I): G = J(x),
     P = GᵀG / ‖G‖²_F, M_a = E[P | E_a] - E[P | not E_a], contrast A_a = d·s_aᵀM_a s_a, on --eval fresh inputs.
 Gate a is stored if the student's A_a ≥ ½ the teacher's and the top eigenvector of the student's M_a has |cos| ≥ 0.8 with
 s_a. Also reported: the noise floor (95% of |A|/d for random row events of prevalence p, on the teacher's rows), how many gates clear absolute thresholds γ/d (teacher and student), the student's function fit (R²)
 and Jacobian error, and the budget of Thm 5, Σ_a p(1-p)A_a² / (κ d²) (≤ B for any model).
 
 Usage: python amp_gate_capacity.py [--d 64] [--m 1,2,4,...] [--H 16,32,...] [--p 0.1] [--seed 0] [--tag main]
-Output: downstream_amp/checks/amp_gate_capacity_<tag>.log, downstream_amp/mode_bound/capacity_<tag>.pt
+Output: downstream_amp/checks/amp_gate_capacity_<tag>.log, downstream_amp/gate_bound/capacity_<tag>.pt
 """
 import argparse
 import math
@@ -126,7 +126,7 @@ def evaluate(teacher, f, jac, g):
 
 results = []
 print(f"planted gates: f*(x) = Qx + {cli.alpha:g}·√d Σ_a σ((o_a·x - t)/{cli.sharp:g})(s_a·x)u_a; student GELU MLP, {cli.steps} steps × "
-      f"{cli.batch}; stored = student contrast ≥ ½ teacher's and |cos(top mode, s_a)| ≥ 0.8; counts at γ/d = {GAMMAS}")
+      f"{cli.batch}; stored = student contrast ≥ ½ teacher's and |cos(top gate direction, s_a)| ≥ 0.8; counts at γ/d = {GAMMAS}")
 for d in lists(cli.d, int):
     for p in lists(cli.p, float):
         print(f"\nd = {d}, p = {p:g}")
@@ -157,7 +157,7 @@ for d in lists(cli.d, int):
             n1 = max((int((r["As"] >= GAMMAS[1] * d).sum()) for r in results if r["d"] == d and r["p"] == p and r["H"] == H), default=0)
             cells.append(f"H {H}: m* {max((r['m'] for r in ok), default=0)}, max stored {best}, max N(γ/d ≥ {GAMMAS[1]:g}) {n1}")
         print(f"  d = {d}, p = {p:g}: " + "; ".join(cells))
-out = RUNS / "mode_bound"
+out = RUNS / "gate_bound"
 out.mkdir(exist_ok=True)
 torch.save({"args": vars(cli), "results": results}, out / f"capacity_{cli.tag}.pt")
 print(f"saved {out / f'capacity_{cli.tag}.pt'}")

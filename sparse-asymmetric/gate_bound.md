@@ -1,17 +1,17 @@
-# Dense-gate mode bound: proofs and empirical checks
+# Dense-gate bound: proofs and empirical checks
 
-This note proves the statements in *Dense-Gate Mode Bound: Theorem and Empirical Verification Plan*, sharpens two of them,
+This note proves the statements in *Dense-Gate Bound: Theorem and Empirical Verification Plan*, sharpens two of them,
 replaces the sketched budget step (ii) with a proof, and reports the checks of §3 of that plan. Code:
-`amp_mode_bound.py` (checks on one run), `amp_mlp_width.py` (retrained MLPs for the d_mlp scaling test),
-`amp_mode_bound.sh` (everything), `amp_mode_bound_table.py` (summary), `amp_bound_tightness.py` (how tight Theorems 5 and 7 are, §3.9c), `amp_containment.py` (Theorem 8's class on trained models, §3.9d). Logs: `downstream_amp/checks/amp_mode_bound_*.log`.
+`amp_gate_bound.py` (checks on one run), `amp_mlp_width.py` (retrained MLPs for the d_mlp scaling test),
+`amp_gate_bound.sh` (everything), `amp_gate_bound_table.py` (summary), `amp_bound_tightness.py` (how tight Theorems 5 and 7 are, §3.9c), `amp_containment.py` (Theorem 8's class on trained models, §3.9d). Logs: `downstream_amp/checks/amp_gate_bound_*.log`.
 
 ## 0. Summary
 
 * **Proved, with no assumptions on the model:**
   * The rank lemma, including the inertia claim (at most k eigenvalues of each sign).
   * The per-opener theorem, plus a strictly stronger variant (Theorem 3′) whose hypothesis can be checked from M_o
-    alone. Its conclusion holds per sign: at most k positive and at most k negative gate modes.
-  * The plan's "stated boundary": modes beyond r = rank w_S are modes of Q M_o Q, i.e. of the part carried outside S.
+    alone. Its conclusion holds per sign: at most k positive and at most k negative gate directions.
+  * The plan's "stated boundary": gate directions beyond r = rank w_S are gate directions of Q M_o Q, i.e. of the part carried outside S.
   * An unconditional per-opener budget, N_± ≤ d/γ (Proposition 1).
   * A total gate-count bound that replaces sketch (ii) (Theorem 5): m ≤ B·κ·d² / (p_min(1−p_min)γ²) ≤ B d²/(p_min(1−p_min)γ²).
     It has a sharper spectral form in terms of the eigenvalues of the fingerprint covariance K, and a further
@@ -23,10 +23,10 @@ replaces the sketched budget step (ii) with a proof, and reports the checks of �
   and §3 measures them.
 * **Empirically.** Checked on 18 one-hidden-layer-into-readout MLPs at d = 512: the pretrained `gelu_1l` L0, the
   pretrained `gelu_2l` L1, and 16 retrained `gelu_1l` MLPs (§3). In all of them:
-  * every qualifying opener has 1 positive gate mode at γ ≥ 50 and at most 2 at γ = 25. There are never any negative
-    modes.
+  * every qualifying opener has 1 positive gate direction at γ ≥ 50 and at most 2 at γ = 25. There are never any negative
+    gate directions.
   * The plan's hypothesis ‖E_S‖ < γ/d fails for single-neuron openers. There ‖E_i‖ ≈ λ₁(M_i) (median ratio 0.97–1.00):
-    the mode is carried by other, co-firing neurons.
+    the gate direction is carried by other, co-firing neurons.
   * For multi-neuron sets the hypothesis holds sometimes. It holds for the sets the earlier anatomy checks found, which
     contain the co-firing neurons. It holds less often for greedy sets.
   * Where it holds, the bound 2k (4–10) is true but loose: the observed count is 1.
@@ -35,7 +35,7 @@ replaces the sketched budget step (ii) with a proof, and reports the checks of �
   top eigenvector is a rank-one matrix s*s*ᵀ (95%), and the one dominant channel *is* s* (|⟨ssᵀ, V₁⟩| = 0.97); 164
   openers open it.
 * **d_mlp scaling at fixed d_model = 512.** The plan's prediction holds:
-  * from d_mlp = 512 to 8192, the number of single-neuron openers that open a mode grows about 8× (71 → 557 at γ = 25);
+  * from d_mlp = 512 to 8192, the number of single-neuron openers that open a gate direction grows about 8× (71 → 557 at γ = 25);
   * the number of distinct channels falls (13.5 → 5 at γ = 25; 3 → 1 at γ = 50);
   * the pipeline's attractor count stays at 4.5–5.5;
   * the same holds for both seeds, with Muon in place of AdamW, and with ReLU or ReLU² in place of GELU.
@@ -68,7 +68,7 @@ replaces the sketched budget step (ii) with a proof, and reports the checks of �
   * Trained models belong to the tolerant version of the class with k ≈ 25 and a 5–9× more coherent remainder than
     isotropic. That V contains essentially all their gates, from d_mlp 32 to 8192.
   * The narrow MLP is in the class exactly, with N = 0 and m ≤ H.
-  * Lean-checked core: `ModeBoundLean/Containment.lean`.
+  * Lean-checked core: `GateBoundLean/Containment.lean`.
 
 ## 1. Setup and notation
 
@@ -86,7 +86,7 @@ positions or the readout. The rank lemma below therefore holds for any downstrea
 G_ρ is closed-form in the one-layer case.
 
 An **opener** is an event E with p = μ(E) ∈ [p_min, 1 − p_min]. Its matrix is M = E[P | E] − E[P | Eᶜ].
-A **gate mode at level γ** is an eigenpair (λ, s) of M with |λ| ≥ t := γ/d. Write N₊(M, t) = #{i : λ_i(M) ≥ t} and
+A **gate direction at level γ** is an eigenpair (λ, s) of M with |λ| ≥ t := γ/d. Write N₊(M, t) = #{i : λ_i(M) ≥ t} and
 N₋(M, t) = #{i : λ_i(M) ≤ −t}, counted with multiplicity.
 
 The contrast A(o, s) = d·sᵀMs is `downstream_amp.py`'s objective, with its normaliser τ (the mean gain of 8 random
@@ -140,7 +140,7 @@ depend on h, and so on S's outputs), and the normaliser Z.
 
 ### Theorem 3 (per-opener bound, as in the plan)
 
-If ‖E_S‖_op < t, then N₊(M, t) ≤ r and N₋(M, t) ≤ r. In particular the number of gate modes is at most 2r ≤ 2k.
+If ‖E_S‖_op < t, then N₊(M, t) ≤ r and N₋(M, t) ≤ r. In particular the number of gate directions is at most 2r ≤ 2k.
 
 *Proof.* By Weyl's inequality, λ_{r+1}(M) ≤ λ_{r+1}(K_S) + λ₁(E_S) ≤ 0 + ‖E_S‖ < t, because λ_{r+1}(K_S) ≤ 0 by
 Lemma 2(ii). Symmetrically, λ_{d−r}(M) ≥ −‖E_S‖ > −t. ∎
@@ -161,7 +161,7 @@ range Q therefore has at least N − r eigenvalues ≥ t. For the identity, Q W_
 The plan's §3 calls ‖QMQ‖ "equivalent" to ‖E_S‖. It is not: ‖QMQ‖ ≤ ‖E_S‖, and the inequality can be strict
 (measured below: 13.5 against 20.1, in units of 1/d). Theorem 3′ is what makes ‖QMQ‖ sufficient anyway.
 
-Theorem 3′ is also the plan's "stated boundary", now a theorem: every gate mode beyond the first r is a mode of the
+Theorem 3′ is also the plan's "stated boundary", now a theorem: every gate direction beyond the first r is a gate direction of the
 compression of E_S off span(w_S), i.e. it is carried by neurons outside S.
 
 ### Theorem 4 (finite samples)
@@ -190,7 +190,7 @@ equals 1 for orthogonal channels and is ≤ 1 + max_a Σ_{b≠a}(s_a·s_b)². Pu
 (a) every gate satisfies Var(s_aᵀPs_a) = ⟨X_a, K X_a⟩ ≥ p_a(1−p_a)γ²/d² ≥ c;
 (b) m·c ≤ B Σ_{i≤m} λ_i, i.e. m ≤ max{m : (1/m)Σ_{i≤m} λ_i ≥ c/B};
 (c) m ≤ B κ / c ≤ B d² / (p_min(1−p_min)γ²);
-(d) per opener, any-sign modes: N·p(1−p)t² ≤ Σ_{i≤N} λ_i.
+(d) per opener, gate directions of either sign: N·p(1−p)t² ≤ Σ_{i≤N} λ_i.
 
 *Proof.* (a) sᵀMs = Cov(q, 1_E)/(p(1−p)) with q = sᵀPs. By Cauchy–Schwarz, |Cov(q, 1_E)| ≤ sd(q)·√(p(1−p)), so
 γ/d ≤ sd(q)/√(p(1−p)); and p(1−p) ≥ p_min(1−p_min) on the allowed interval.
@@ -388,7 +388,7 @@ with K replaced by its full symmetrisation K̂(X) = ⅓E[⟨D, X⟩D + 2DXD], D 
 Lean: (a) `mass_mul_contrast_eq`; (b) `linear_budget_on`, `gate_count_on`; (c) `contrast_le_split`, `quantile_budget`,
 `gate_count_quantile` (trace form; the spectral form needs von Neumann's inequality, as for Theorem 7); (d)
 `linear_budget_gate_abs`, `gate_count_abs`, `contrast_abs_le_one`, `gate_count_orthonormal_linear`; (e)
-`linear_budget_sharp` (the Theorem 7 half). All are in `ModeBoundLean/Sharp.lean`.
+`linear_budget_sharp` (the Theorem 7 half). All are in `GateBoundLean/Sharp.lean`.
 
 ### Theorem 8 (the gated subspace: containment, and the spiked–incoherent class)
 
@@ -401,11 +401,11 @@ computation in superposition (Adler and Shavit, arXiv:2409.15318; Hänni et al.,
 
 The setting is general: P_ρ is any PSD row operator. For a fingerprint, P_ρ = GᵀG/Z with any downstream network and
 any PSD output metric. Events are arbitrary, and nothing is assumed about how a gate is implemented or how many neurons
-carry it. Fix a subspace V of dimension k, with projectors Π, Π⊥. A *gate mode* at level t = γ/d is an eigenpair
+carry it. Fix a subspace V of dimension k, with projectors Π, Π⊥. A *gate direction* at level t = γ/d is an eigenpair
 M_E s = λs with λ ≥ t.
 
 **(a) Containment.** Define the *outside capacity* τ⊥(V) = sup_E λ_max(Π⊥M_EΠ⊥) and the *cross capacity*
-τ×(V) = sup_E ‖Π⊥M_EΠ‖. Then every gate mode with λ > τ⊥ has
+τ×(V) = sup_E ‖Π⊥M_EΠ‖. Then every gate direction with λ > τ⊥ has
 
   ((λ − τ⊥)² + τ×²)·‖Π⊥s‖² ≤ τ×²·‖s‖².
 
@@ -426,7 +426,7 @@ fourth moments are those of Haar measure. Then for any event, any opener and any
   τ⊥ ≤ γ_N/d,  γ_N := √( (2E‖N‖²_F + Var tr N) / (p(1−p)) ),
   τ× ≤ γ_×/d,  γ_× := √( E‖N‖²_F / (p(1−p)) ) · d/√((d−1)(d+2)).
 
-So for γ > γ_N every gate mode has ‖Π⊥s‖² ≤ ε = γ_×²/(γ_×² + (γ − γ_N)²), and m ≤ B·k/(1 − ε).
+So for γ > γ_N every gate direction has ‖Π⊥s‖² ≤ ε = γ_×²/(γ_×² + (γ − γ_N)²), and m ≤ B·k/(1 − ε).
 
 The constants do not depend on d, on the width, or on the orientation of anything. Because N ⪯ P,
 E‖N‖²_F ≤ E‖P‖²_F ≤ 1 and Var tr N ≤ ¼, so γ_N ≤ √(2.25/(p(1−p))) (= 5 at p = 0.1) for *every* model in the class. With
@@ -472,7 +472,7 @@ which is why an isotropic remainder shows a cross capacity of 4–6 rather than 
 Lean: (a) `containment`; (b) `card_le_of_contained`; Theorem 5(a) as a capacity bound, `abs_contrast_le_of_var`;
 (c), (d) `spiked_containment` and `spiked_count`, with the two variance bounds as hypotheses (over any finite row
 distribution); Corollary 8.1, `concentratedCount` and `card_le_concentratedCount`. All are in
-`ModeBoundLean/Containment.lean`. The Haar fourth-moment computation in (c) is not
+`GateBoundLean/Containment.lean`. The Haar fourth-moment computation in (c) is not
 formalized: Mathlib has no Haar moments.
 
 ### Proposition 6 (width lower bound for exact gates)
@@ -507,9 +507,9 @@ the Hessian. So Proposition 6 bounds exact or Hessian-faithful storage, not the 
 ### What is proved, and what is not
 
 **Proved, unconditionally:**
-* d_mlp-free bounds on gate modes per opener (Proposition 1(d), Theorem 5(d)) and on distinct channels in total
+* d_mlp-free bounds on gate directions per opener (Proposition 1(d), Theorem 5(d)) and on distinct channels in total
   (Theorem 5).
-* Under ‖QMQ‖ < γ/d (implied by ‖E_S‖ < γ/d): at most r ≤ k gate modes of each sign per k-neuron opener.
+* Under ‖QMQ‖ < γ/d (implied by ‖E_S‖ < γ/d): at most r ≤ k gate directions of each sign per k-neuron opener.
 * Sharper budgets (Theorems 7′, 7*), the domination of Theorem 5's unconditional bound by the linear budget, and a
   construction attaining Theorems 7 and 5 (given κ). So neither can be improved from (d, p, γ) or (d, p, γ, κ) alone.
 
@@ -564,11 +564,11 @@ The γ thresholds are in exact contrast units. The pipeline's attractors on `gel
 K's top eigenvector is almost exactly a rank-one matrix ±vvᵀ. In `gelu_2l` L1 the top three eigenvalues of K are nearly
 degenerate (0.028, 0.026, 0.024 of κ).
 
-### 3.2–3.3 Residual test and mode counts (plan steps 2–3)
+### 3.2–3.3 Residual test and gate-direction counts (plan steps 2–3)
 
 `gelu_1l`, γ = 25 / 50 / 100 (γ/d = 0.049 / 0.098 / 0.195):
 
-| openers | with ≥ 1 mode | N₊ max | N₋ max | Thm 3 holds (‖E_S‖ < γ/d) | Thm 3′ holds (‖QMQ‖ < γ/d) |
+| openers | with ≥ 1 gate direction | N₊ max | N₋ max | Thm 3 holds (‖E_S‖ < γ/d) | Thm 3′ holds (‖QMQ‖ < γ/d) |
 |---|---|---|---|---|---|
 | single neurons (2048) | 155 / 8 / 0 | 2 / 1 / – | 0 | 5/155, 2/8 | 18/155, 6/8 |
 | greedy k = 2–4 (24) | 24 / 24 / 8 | 1 | 0 | 9/24, 20/24, 24/24 | 22/24, 22/24, 24/24 |
@@ -576,16 +576,16 @@ degenerate (0.028, 0.026, 0.024 of κ).
 | random sets (32) | 2 / 0 / 0 | 1 | 0 | – | – |
 
 **Single neurons.** For the top 50 single-neuron openers, ‖E_i‖/λ₁(M_i) has median 1.00 and ‖QMQ‖/λ₁ has median 0.98:
-the mode is essentially orthogonal to the opener's own read direction. The same holds in every model (median
+the gate direction is essentially orthogonal to the opener's own read direction. The same holds in every model (median
 0.97–1.00), so for k = 1 the plan's hypothesis fails.
 
 **Sets that contain the co-firing neurons.** Example: S = {251, 1608}, the pair the anatomy check found firing
 together.
 * d·‖E_S‖ = 17 and d·‖QMQ‖ = 10, against d·λ₁ = 88. Theorem 3's hypothesis holds at γ = 25 and 50.
-* 94% of the gate mode lies in span(w_S): the channel is read by the opener neurons themselves.
+* 94% of the gate direction lies in span(w_S): the channel is read by the opener neurons themselves.
 * K_S has one large positive eigenvalue (86) and one negative partner (−17). The negative partner comes from the
   x yᵀ + y xᵀ structure: for k = 1, w aᵀ + a wᵀ has eigenvalues (w·a) ± ‖w‖‖a‖. E_S cancels it, which is why M itself
-  has no negative mode.
+  has no negative gate direction.
 * So the gate is a *pair-mediated* one, which is the plan's boundary case: firing neuron 1608 alone moves the channel
   only because 251 co-fires.
 
@@ -600,7 +600,7 @@ every set.
 Theorem 3′'s inequality N₊ ≤ r + N₊(QMQ) is never violated in any model. It is a theorem, so this is a check of the
 code rather than of the model.
 
-The run's attractors are M_o's top eigenvectors: on `gelu_1l` |cos(s, top mode)| is 0.98, 0.99 and 0.84. Their exact
+The run's attractors are M_o's top eigenvectors: on `gelu_1l` |cos(s, top gate direction)| is 0.98, 0.99 and 0.84. Their exact
 contrasts are 80 / 51 / 57, against the pipeline's τ-normalised 101 / 70 / 81.
 
 ### 3.4 Overlap (plan step 4)
@@ -626,7 +626,7 @@ and d·‖E_S‖ = 45–51.
   the tightest of the per-opener bounds, and it needs no hypothesis.
 
 **What the channels are.** The pretrained `gelu_1l` has 2 distinct channels at γ = 25 and 50, and 1 at γ = 100.
-Channel 0 is V₁(K): |⟨ssᵀ, V₁⟩| = 0.97 and Var(sᵀPs) = 0.95·λ₁(K). It is opened by 164 of the 189 (opener, mode) pairs
+Channel 0 is V₁(K): |⟨ssᵀ, V₁⟩| = 0.97 and Var(sᵀPs) = 0.95·λ₁(K). It is opened by 164 of the 189 (opener, direction) pairs
 at γ = 25. Across the retrained models, channel 0 is V₁ in about half of them (|⟨ssᵀ, V₁⟩| 0.58–0.94) and lies elsewhere
 in the top of K in the rest. In every retrained model channel 0 has Var(sᵀPs) = 0.61–0.90·λ₁(K). In `gelu_2l` the three γ = 50 channels split K's near-degenerate top
 three (|⟨ssᵀ, V₁⟩| = 0.39, 0.57, 0.44).
@@ -645,9 +645,9 @@ GELU / AdamW, mean of 2 seeds:
 | d_mlp | 512 | 1024 | 2048 | 4096 | 8192 |
 |---|---|---|---|---|---|
 | held-out loss | 4.71 | 4.60 | 4.51 | 4.45 | 4.41 |
-| neurons opening a mode, γ = 25 | 71 | 109 | 167 | 296 | 557 |
+| neurons opening a gate direction, γ = 25 | 71 | 109 | 167 | 296 | 557 |
 | distinct channels, γ = 25 | 13.5 | 9.0 | 6.0 | 5.5 | 5.0 |
-| neurons opening a mode, γ = 50 | 20 | 22 | 34 | 62 | 114 |
+| neurons opening a gate direction, γ = 50 | 20 | 22 | 34 | 62 | 114 |
 | distinct channels, γ = 50 | 3.0 | 1.0 | 1.5 | 1.5 | 1.0 |
 | pipeline attractors (`downstream_amp.py`) | 5.5 | 4.5 | 4.5 | 4.5 | 5.0 |
 | openers of the dominant channel, γ = 25 | 58–103 | 123–134 | 184–195 | 325–331 | 616–620 |
@@ -670,14 +670,14 @@ openers grows roughly in proportion to d_mlp, and they pile onto the same few ch
 | pretrained gelu_2l L1 | 7 / 3 | 6 | 0.165 | 0.0046 |
 
 κ and λ₁(K) stay in a narrow band (κ 0.14–0.17; λ₁ 0.010–0.013 except `gelu_2l`). So do the counts, and so does the
-per-opener structure: one positive mode, no negative modes, and ‖E_i‖ ≈ λ₁ for single neurons. Theorem 3's hypothesis
+per-opener structure: one positive gate direction, no negative gate directions, and ‖E_i‖ ≈ λ₁ for single neurons. Theorem 3's hypothesis
 for greedy sets is the variable part. It holds for 0–7 of 24 at γ = 25 in the retrained models, against 9/24 in the
 pretrained one.
 
 ### 3.9 Statistics (plan step 9)
 
-**Held-out replication.** Mode counts replicate: per-opener N₊ is identical on the fitting and held-out rows for all
-anatomy, run-opener and greedy sets, except two greedy sets near threshold. The number of single neurons with a mode is 155 → 182 at γ = 25 and
+**Held-out replication.** Gate-direction counts replicate: per-opener N₊ is identical on the fitting and held-out rows for all
+anatomy, run-opener and greedy sets, except two greedy sets near threshold. The number of single neurons with a gate direction is 155 → 182 at γ = 25 and
 8 → 13 at γ = 50; these are threshold effects near γ.
 
 **Window bootstrap** (100 resamples). For the strongest openers, d·λ₁ is stable to ±3–4 and d·λ₂ to ±0.5, and the
@@ -866,7 +866,7 @@ models, not of the architecture, and nothing here proves it.
 The bounds in §2 are all set by d (and γ, p); none depends on H. This section asks whether width limits gate storage at
 all, from two sides. On the achievability side, planted gates (`amp_gate_capacity.py`) measure how many gates a width-H
 MLP *can* store. On the observation side, the d_mlp sweep is extended down to 32 ≪ d = 512 (`amp_mlp_width.py`,
-`amp_mode_bound.py`).
+`amp_gate_bound.py`).
 
 ### 4.1 Planted gates
 
@@ -881,7 +881,7 @@ MLP *can* store. On the observation side, the d_mlp sweep is extended down to 32
 
 **Stored:** a planted gate counts as stored if both
 * the student's contrast is at least half the teacher's, and
-* the student's top mode of M_a has |cos| ≥ 0.8 with s_a.
+* the student's top gate direction of M_a has |cos| ≥ 0.8 with s_a.
 
 m* is the largest m with ≥ 90% of gates stored. Noise floor: random events give |A|/d ≤ 0.001.
 
@@ -903,7 +903,7 @@ Finer m grid (11 values of m):
 * For d ≥ 128, storage costs exactly 2 neurons per gate. That is the minimum Proposition 6 allows for exact storage, so
   the bound is attained.
 * At small d it costs more.
-* At d = 32 storage stops at about 3d, whatever the width. There the *teacher's* own modes stop aligning with their
+* At d = 32 storage stops at about 3d, whatever the width. There the *teacher's* own gate directions stop aligning with their
   channels (|cos| 0.88 at m = 128, 0.74 at m = 256): gates in excess of about 3d are not separately identifiable.
 
 **Storage at a fixed contrast is not width-limited.** The teacher's per-gate contrast falls as gates are added, and for
@@ -926,13 +926,13 @@ Retrained `gelu_1l` MLPs, GELU / AdamW, mean of 2 seeds:
 | d_mlp | 32 | 64 | 128 | 256 | 512 | 1024 | 2048 | 4096 | 8192 |
 |---|---|---|---|---|---|---|---|---|---|
 | loss reduction recovered | 0.83 | 0.88 | 0.92 | 0.96 | 0.99 | 1.01 | 1.03 | 1.04 | 1.05 |
-| neurons opening a mode (γ = 25) | 30 | 42 | 40 | 47 | 71 | 109 | 167 | 296 | 557 |
+| neurons opening a gate direction (γ = 25) | 30 | 42 | 40 | 47 | 71 | 109 | 167 | 296 | 557 |
 | distinct channels, γ = 25 | 13.5 | 12.0 | 12.5 | 13.5 | 13.5 | 9.0 | 6.0 | 5.5 | 5.0 |
 | distinct channels, γ = 50 | 5.0 | 3.5 | 3.0 | 3.0 | 3.0 | 1.0 | 1.5 | 1.5 | 1.0 |
 | distinct channels, γ = 100 | 3.0 | 2.0 | 1.5 | 0 | 0 | 0 | 0 | 0 | 0 |
 | λ₁(K)/κ | 0.13 | 0.10 | 0.11 | 0.08 | 0.08 | 0.08 | 0.08 | 0.08 | 0.08 |
 
-**Width saturates only at the narrow end.** At d_mlp = 32, 30 of the 32 neurons open a mode and there are about 13
+**Width saturates only at the narrow end.** At d_mlp = 32, 30 of the 32 neurons open a gate direction and there are about 13
 distinct channels. That is the planted storage limit, H/c ≈ 32/2.5. So the narrowest MLP is at its width capacity, and
 it spends it on gates: it has the *strongest* gates of any width, the only ones above γ = 100 besides ReLU².
 
@@ -973,8 +973,8 @@ training finds useful is. Neither the theory nor these experiments identify that
 
 ## 5. Lean formalization
 
-`mode_bound_lean/` checks the following in Lean 4 / Mathlib, with no `sorry` and only the standard axioms:
-* the link between gate modes (eigenvalues) and gate spaces;
+`gate_bound_lean/` checks the following in Lean 4 / Mathlib, with no `sorry` and only the standard axioms:
+* the link between gate directions (eigenvalues) and gate spaces;
 * Lemma 2, Theorem 3 (both signs) and Theorem 3′, for the neuron model `M = Σᵢⱼ ΔAᵢⱼ wᵢwⱼᵀ`;
 * Proposition 1;
 * the fingerprint `P = GᵀG/‖G‖²_F` being positive with trace 1;
@@ -985,13 +985,13 @@ training finds useful is. Neither the theory nor these experiments identify that
   channels `m·p(1-p)γ²/d² ≤ B₀·κ`, where `B₀` is the frame bound on trace-zero matrices (Theorem 5″(a),
   `gate_count_traceless`);
 * the width results: the inertia count, and the result that `m` bilinear gates need exactly `2m` neurons;
-* the sharper budgets of §2 (`ModeBoundLean/Sharp.lean`): Theorem 7′ (co-open frame), Theorem 7* in trace form,
+* the sharper budgets of §2 (`GateBoundLean/Sharp.lean`): Theorem 7′ (co-open frame), Theorem 7* in trace form,
   the two-sided budget with Theorem 5's unconditional bound as a `d/γ`-times-sharper corollary, and the construction
   attaining Theorem 7;
-* Theorem 8 (`ModeBoundLean/Containment.lean`): containment from outside and cross capacities, the count
+* Theorem 8 (`GateBoundLean/Containment.lean`): containment from outside and cross capacities, the count
   `m ≤ B·dim V/(1 - ε)`, and the spiked–incoherent class with its variance hypotheses (the Haar moments that supply them
   are proved on paper only).
 
-`mode_bound_lean/README.md` maps each result to its Lean theorem and lists what is not formalized: Theorem 4, the
+`gate_bound_lean/README.md` maps each result to its Lean theorem and lists what is not formalized: Theorem 4, the
 spectral forms (5 (b), 5′), the random-channel bounds 5″(b), (c) (like Theorem 4, they need random-matrix results that Mathlib lacks), and
 Proposition 6 for general activations.

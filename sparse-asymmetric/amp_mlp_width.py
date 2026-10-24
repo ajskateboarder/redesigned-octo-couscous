@@ -1,5 +1,5 @@
 """Retrain gelu_1l's MLP at other widths, activations, optimizers and seeds: the d_mlp scaling test at fixed d_model = 512
-(mode_bound.md step 7) and the robustness runs (step 8). Embeddings, attention, LayerNorms and unembedding are the
+(gate_bound.md step 7) and the robustness runs (step 8). Embeddings, attention, LayerNorms and unembedding are the
 pretrained NeelNanda/GELU_1L512W_C4_Code and stay frozen; only the MLP is trained, from scratch, on next-token loss on
 OpenWebText row groups 0-59 (downstream_amp.py's rows come from 60-61), retokenised into 64-token windows that start with
 <|BOS|>. Every run sees the same windows in the same order (one epoch), so width, activation and optimizer are the only
@@ -10,7 +10,7 @@ differences. Held-out loss is on row group 63, next to the pretrained MLP's and 
            biases: the adamw settings
 
 Usage: python amp_mlp_width.py --width 2048 [--act gelu|relu|relu2] [--opt adamw|muon] [--seed 0]
-Output: downstream_amp/mode_bound/mlp/w{width}_{act}_{opt}_s{seed}.pt, used as --model gelu_1l+w{width}_{act}_{opt}_s{seed}
+Output: downstream_amp/gate_bound/mlp/w{width}_{act}_{opt}_s{seed}.pt, used as --model gelu_1l+w{width}_{act}_{opt}_s{seed}
 """
 import argparse
 import math

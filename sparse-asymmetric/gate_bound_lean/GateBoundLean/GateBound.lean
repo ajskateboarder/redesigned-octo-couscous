@@ -1,5 +1,5 @@
-import ModeBoundLean.Budget
-import ModeBoundLean.Variance
+import GateBoundLean.Budget
+import GateBoundLean.Variance
 
 /-!
 # The gate bound for fingerprints (Theorem 5 (c) with `κ ≤ 1`)
@@ -30,7 +30,7 @@ set_option linter.unusedSectionVars false
 
 noncomputable section
 
-namespace ModeBound
+namespace GateBound
 
 variable {E : Type*} [NormedAddCommGroup E] [InnerProductSpace ℝ E] [FiniteDimensional ℝ E]
 
@@ -269,7 +269,7 @@ theorem sum_var_fingerprint_le_traceless (hμ : ∀ ρ, 0 ≤ μ ρ) (hsum : ∑
 
 /-- **The gate bound, overlapping channels**: with every row's gradient nonzero, gates on channels whose frame bound on
 trace-zero matrices is `B₀` satisfy `m · c · δ² ≤ B₀·κ ≤ B₀·(1 - 1/d)`. For `m` random channels `B₀` stays near
-`(1 + √(2m)/d)²` (`mode_bound.md` §5), while the full frame bound grows like `1 + m/d`. -/
+`(1 + √(2m)/d)²` (`gate_bound.md` §5), while the full frame bound grows like `1 + m/d`. -/
 theorem gate_count_traceless (hμ : ∀ ρ, 0 ≤ μ ρ) (hsum : ∑ ρ, μ ρ = 1) (hg : ∀ ρ, ∑ k, ‖g ρ k‖ ^ 2 ≠ 0)
     {ι : Type*} [Fintype ι] (s : ι → E) {B : ℝ}
     (hB : ∀ D : E →ₗ[ℝ] E, D.IsSymmetric → LinearMap.trace ℝ E D = 0 → ∑ a, ⟪D (s a), s a⟫ ^ 2 ≤ B * hsSq D)
@@ -294,6 +294,6 @@ theorem gate_count_orthonormal (hμ : ∀ ρ, 0 ≤ μ ρ) (hsum : ∑ ρ, μ ρ
     (fun D hD => by simpa using sum_sq_inner_le_hsSq hD hs) e hp hp' hc hδ hδa
   linarith
 
-end ModeBound
+end GateBound
 
 end

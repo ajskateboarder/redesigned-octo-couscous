@@ -1,4 +1,4 @@
-import ModeBoundLean.GateSpace
+import GateBoundLean.GateSpace
 
 /-!
 # Width (Proposition 6, Example 9 of the write-up)
@@ -22,7 +22,7 @@ set_option linter.unusedSectionVars false
 
 noncomputable section
 
-namespace ModeBound
+namespace GateBound
 
 variable {E : Type*} [NormedAddCommGroup E] [InnerProductSpace ℝ E] [FiniteDimensional ℝ E]
 
@@ -146,6 +146,6 @@ theorem sqNet_bilinearGates {m : ℕ} (o s : Fin m → E) :
   rw [← sum_add_distrib]
   exact sum_congr rfl fun a _ => by ring
 
-end ModeBound
+end GateBound
 
 end

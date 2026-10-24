@@ -1,4 +1,4 @@
-import ModeBoundLean.GateSpace
+import GateBoundLean.GateSpace
 
 /-!
 # The rank lemma and the per-opener bound (Lemma 2, Theorems 3 and 3′)
@@ -11,10 +11,10 @@ mean-difference matrix is `M = neuronOp w ΔA` with `ΔA = E[A | on] - E[A | off
 * `readS w` is `W_Sᵀ`, the read-outs of the neurons in `S`; `rank W_S ≤ |S|` (`finrank_range_readS_le`).
 * **Lemma 2**: `M` and `E_S` have the same quadratic form on `ker W_Sᵀ` (`inner_neuronOp_eq_remainder`), so
   `K_S = M - E_S` has at most `rank W_S` positive and at most `rank W_S` negative directions (`rank_lemma`).
-* **Theorem 3**: if `⟪E_S x, x⟫ < t‖x‖²` (resp. `-⟪E_S x, x⟫ < t‖x‖²`) for `x ≠ 0`, the opener has at most `|S|` gate modes
-  that open (resp. close) at level `t` (`card_gateModes_le`).
-* **Theorem 3′**: without that hypothesis, the modes beyond `rank W_S` form a gate space of `E_S` inside `ker W_Sᵀ`
-  (`gateModes_compression`): they are carried by the neurons outside `S`.
+* **Theorem 3**: if `⟪E_S x, x⟫ < t‖x‖²` (resp. `-⟪E_S x, x⟫ < t‖x‖²`) for `x ≠ 0`, the opener has at most `|S|` gate directions
+  that open (resp. close) at level `t` (`card_gateDirections_le`).
+* **Theorem 3′**: without that hypothesis, the gate directions beyond `rank W_S` form a gate space of `E_S` inside `ker W_Sᵀ`
+  (`gateDirections_compression`): they are carried by the neurons outside `S`.
 -/
 
 open Module Submodule
@@ -24,7 +24,7 @@ set_option linter.unusedSectionVars false
 
 noncomputable section
 
-namespace ModeBound
+namespace GateBound
 
 variable {E : Type*} [NormedAddCommGroup E] [InnerProductSpace ℝ E] [FiniteDimensional ℝ E]
 
@@ -97,7 +97,7 @@ theorem rank_lemma (A : Matrix (S ⊕ R) (S ⊕ R) ℝ) (σ : ℝ) (V : Submodul
 
 /-- **Theorem 3′**: every gate space of `M` at level `t` has dimension at most `rank W_S` plus the dimension of its
 part inside `ker W_Sᵀ`, and that part is a gate space of `E_S`. -/
-theorem gateModes_compression (A : Matrix (S ⊕ R) (S ⊕ R) ℝ) {t : ℝ} {V : Submodule ℝ E}
+theorem gateDirections_compression (A : Matrix (S ⊕ R) (S ⊕ R) ℝ) {t : ℝ} {V : Submodule ℝ E}
     (hV : IsGateSpace (neuronOp w A) t V) :
     IsGateSpace (remainder w A) t (V ⊓ LinearMap.ker (readS w)) ∧
       finrank ℝ V ≤ Fintype.card S + finrank ℝ ↥(V ⊓ LinearMap.ker (readS w)) := by
@@ -106,7 +106,7 @@ theorem gateModes_compression (A : Matrix (S ⊕ R) (S ⊕ R) ℝ) {t : ℝ} {V 
 
 /-- **Theorem 3** (gate spaces): if `⟪E_S x, x⟫ < t‖x‖²` for all `x ≠ 0`, every gate space of `M` at level `t` has
 dimension at most `|S|`. -/
-theorem gateModes_le (A : Matrix (S ⊕ R) (S ⊕ R) ℝ) {t : ℝ}
+theorem gateDirections_le (A : Matrix (S ⊕ R) (S ⊕ R) ℝ) {t : ℝ}
     (hE : ∀ x, x ≠ 0 → ⟪remainder w A x, x⟫ < t * ‖x‖ ^ 2) {V : Submodule ℝ E}
     (hV : IsGateSpace (neuronOp w A) t V) : finrank ℝ V ≤ Fintype.card S :=
   (gateSpace_finrank_le _ _ (readS w) (inner_neuronOp_eq_remainder w A) hE hV).trans (finrank_range_readS_le w)
@@ -114,20 +114,20 @@ theorem gateModes_le (A : Matrix (S ⊕ R) (S ⊕ R) ℝ) {t : ℝ}
 /-- **Theorem 3** (eigenvalues): for a symmetric `ΔA`, if `±⟪E_S x, x⟫ < t‖x‖²` for all `x ≠ 0`, the opener's matrix
 `M = neuronOp w ΔA` has at most `|S|` eigenvalues `≥ t` and at most `|S|` eigenvalues `≤ -t`, whatever the number of
 neurons. -/
-theorem card_gateModes_le (A : Matrix (S ⊕ R) (S ⊕ R) ℝ) (hA : A.IsSymm) {n : ℕ} (hn : finrank ℝ E = n) {t : ℝ}
+theorem card_gateDirections_le (A : Matrix (S ⊕ R) (S ⊕ R) ℝ) (hA : A.IsSymm) {n : ℕ} (hn : finrank ℝ E = n) {t : ℝ}
     (hEpos : ∀ x, x ≠ 0 → ⟪remainder w A x, x⟫ < t * ‖x‖ ^ 2)
     (hEneg : ∀ x, x ≠ 0 → -⟪remainder w A x, x⟫ < t * ‖x‖ ^ 2) :
     (Finset.univ.filter fun i => t ≤ (neuronOp_isSymmetric w hA).eigenvalues hn i).card ≤ Fintype.card S ∧
       (Finset.univ.filter fun i => t ≤ -(neuronOp_isSymmetric w hA).eigenvalues hn i).card ≤ Fintype.card S := by
   constructor
   · have := card_eigen_le (neuronOp_isSymmetric w hA) hn 1 t (N := Fintype.card S)
-      (fun V hV => gateModes_le w A hEpos (by simpa using hV))
+      (fun V hV => gateDirections_le w A hEpos (by simpa using hV))
     simpa using this
   · have := card_eigen_le (neuronOp_isSymmetric w hA) hn (-1) t (N := Fintype.card S) fun V hV =>
-      gateModes_le w (-A) (fun x hx => by simpa [remainder_neg] using hEneg x hx)
+      gateDirections_le w (-A) (fun x hx => by simpa [remainder_neg] using hEneg x hx)
         (by simpa [neuronOp_neg] using hV)
     simpa using this
 
-end ModeBound
+end GateBound
 
 end

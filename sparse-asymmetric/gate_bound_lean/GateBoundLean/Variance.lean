@@ -1,4 +1,4 @@
-import ModeBoundLean.Prob
+import GateBoundLean.Prob
 
 /-!
 # Variance budget (Theorem 5 (a), (c))
@@ -16,7 +16,7 @@ open scoped InnerProductSpace RealInnerProductSpace
 
 noncomputable section
 
-namespace ModeBound
+namespace GateBound
 
 variable {Ω : Type*} [Fintype Ω] (μ : Ω → ℝ)
 
@@ -109,6 +109,6 @@ theorem gate_count_var (hμ : ∀ ρ, 0 ≤ μ ρ) (hsum : ∑ ρ, μ ρ = 1) (Y
           _ ≤ _ := h
     _ ≤ _ := sum_var_le μ hμ Y X hB
 
-end ModeBound
+end GateBound
 
 end

@@ -1,20 +1,20 @@
-"""Table of amp_mode_bound.py results across models (mode_bound.md steps 7-8): for each run in downstream_amp/mode_bound/,
+"""Table of amp_gate_bound.py results across models (gate_bound.md steps 7-8): for each run in downstream_amp/gate_bound/,
 d_mlp, activation, optimizer, seed, how much of the pretrained MLP's loss reduction the retrained MLP recovers, the
-pipeline's attractor count (downstream_amp.py), the kernel (κ, λ₁(K)), and per γ: single-neuron openers with a mode,
+pipeline's attractor count (downstream_amp.py), the kernel (κ, λ₁(K)), and per γ: single-neuron openers with a gate direction,
 largest N₊ per opener, distinct channels, the Thm 5 bound, and how often Thm 3's condition ‖E_S‖ < γ/d holds.
 
-Usage: python amp_mode_bound_table.py
-Output: downstream_amp/checks/amp_mode_bound_table.log
+Usage: python amp_gate_bound_table.py
+Output: downstream_amp/checks/amp_gate_bound_table.log
 """
 import numpy as np
 import torch
 
 from amp_common import RUNS, log_to
 
-log_to("amp_mode_bound_table")
-MLP = RUNS / "mode_bound" / "mlp"
+log_to("amp_gate_bound_table")
+MLP = RUNS / "gate_bound" / "mlp"
 rows = []
-for p in sorted((RUNS / "mode_bound").glob("*.pt")):
+for p in sorted((RUNS / "gate_bound").glob("*.pt")):
     if p.name.startswith(("owt_", "capacity_")):
         continue
     r = torch.load(p, weights_only=False)
@@ -29,7 +29,7 @@ for p in sorted((RUNS / "mode_bound").glob("*.pt")):
     rows.append((r["H"], act, opt, seed, rec, r, p.stem))
 rows.sort(key=lambda t: (t[2] == "pretrained", t[1], t[2], t[0], t[3]))
 gammas = sorted(rows[0][5]["summary"])
-print("per γ: neurons with a mode (k = 1) / max N₊ per opener / distinct channels / Thm 5 bound (spectral, B as measured) / "
+print("per γ: neurons with a gate direction (k = 1) / max N₊ per opener / distinct channels / Thm 5 bound (spectral, B as measured) / "
       "Thm 3 holds for greedy sets")
 print(f"{'run':44s} {'d_mlp':>5s} {'act':5s} {'opt':10s} {'seed':4s} {'recov':>5s} {'attr':>4s} {'κ':>6s} {'λ₁(K)':>6s} | " +
       " | ".join(f"γ = {g:g}".ljust(26) for g in gammas))

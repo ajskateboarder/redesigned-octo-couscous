@@ -1,22 +1,22 @@
-# mode_bound_lean
+# gate_bound_lean
 
-Lean 4 / Mathlib formalization of the bounds in `../mode_bound.md`. Build with `lake build` (Lean and Mathlib
+Lean 4 / Mathlib formalization of the bounds in `../gate_bound.md`. Build with `lake build` (Lean and Mathlib
 v4.35.0; `lake exe cache get` fetches prebuilt Mathlib). Every theorem below depends only on Lean's standard axioms
 (`propext`, `Classical.choice`, `Quot.sound`); there is no `sorry`.
 
 The input space is any finite-dimensional real inner product space `E` (the whitened MLP input, `d = finrank E`).
-Rows are a finite weighted set (`Prob.lean`). Gate modes are counted through *gate spaces*: subspaces on which
+Rows are a finite weighted set (`Prob.lean`). Gate directions are counted through *gate spaces*: subspaces on which
 `⟪M x, x⟫ ≥ t‖x‖²` (`t = γ/d`). `card_eigen_le` turns any bound on gate spaces into a bound on the number of
-eigenvalues `≥ t` (modes that open) or `≤ -t` (modes that close).
+eigenvalues `≥ t` (gate directions that open) or `≤ -t` (gate directions that close).
 
-| mode_bound.md | Lean (namespace `ModeBound`) | file |
+| gate_bound.md | Lean (namespace `GateBound`) | file |
 |---|---|---|
-| gate modes ↔ gate spaces | `exists_gateSpace_eigen`, `card_eigen_le` | GateSpace |
+| gate directions ↔ gate spaces | `exists_gateSpace_eigen`, `card_eigen_le` | GateSpace |
 | Lemma 2 (i): `M = K_S + E_S`, `K_S` vanishes on `ker W_Sᵀ` | `neuronOp`, `remainder`, `readS`, `inner_neuronOp_eq_remainder` | RankLemma |
 | Lemma 2 (ii): `K_S` has ≤ `rank W_S` positive and ≤ `rank W_S` negative directions | `rank_lemma`, `finrank_range_readS_le` | RankLemma |
-| Theorem 3: `±⟪E_S x, x⟫ < t‖x‖²` ⇒ ≤ `\|S\|` modes that open and ≤ `\|S\|` that close | `gateModes_le`, `card_gateModes_le` | RankLemma |
-| Theorem 3′: modes beyond `rank W_S` are a gate space of `E_S` inside `ker W_Sᵀ` | `gateModes_compression`, `gateSpace_compression` | RankLemma, GateSpace |
-| Proposition 1: `t · dim ≤ 1`, i.e. ≤ `d/γ` modes per opener | `gate_budget`, `opener_budget`, `opener_budget_count` | Budget |
+| Theorem 3: `±⟪E_S x, x⟫ < t‖x‖²` ⇒ ≤ `\|S\|` gate directions that open and ≤ `\|S\|` that close | `gateDirections_le`, `card_gateDirections_le` | RankLemma |
+| Theorem 3′: gate directions beyond `rank W_S` are a gate space of `E_S` inside `ker W_Sᵀ` | `gateDirections_compression`, `gateSpace_compression` | RankLemma, GateSpace |
+| Proposition 1: `t · dim ≤ 1`, i.e. ≤ `d/γ` gate directions per opener | `gate_budget`, `opener_budget`, `opener_budget_count` | Budget |
 | fingerprints `P = GᵀG/‖G‖²_F` are positive with trace 1 | `fingerprint`, `fingerprint_isPositive`, `trace_fingerprint` | Budget |
 | Theorem 7 (one gate): `p·A ≤ d·sᵀP̄s` | `linear_budget_gate` | Budget |
 | Theorem 7: `Σₐ pₐAₐ ≤ d·B`; `m ≤ B·d/(p_min γ)` | `linear_budget`, `gate_count_le`, `frame_of_orthonormal` | Budget |
@@ -31,7 +31,7 @@ eigenvalues `≥ t` (modes that open) or `≤ -t` (modes that close).
 | Theorem 7*: `p(1-p)Δ ≤ (1-p)E[a] + pE[b]` for `q = y + a - b`; `m·p(1-p)δ ≤ B·E[(1-p)tr Y⁺ + p tr Y⁻]` for `P - Y₀ = Y⁺ - Y⁻` | `contrast_le_split`, `quantile_budget`, `gate_count_quantile`, `sum_inner_le_frame_trace` | Sharp |
 | two-sided budget `min(p,1-p)\|Δ\| ≤ E[q]`; `\|Δ\| ≤ 1`; Theorem 5's bound from it, `d/γ` times sharper: `m·c·δ ≤ 1` | `linear_budget_gate_abs`, `gate_count_abs`, `contrast_abs_le_one`, `gate_count_orthonormal_linear` | Sharp |
 | Theorem 7 is attained: `r·j` gates with `p = 1/r`, `δ = 1/j` | `linear_budget_sharp` | Sharp |
-| Theorem 8 (a): containment, `((λ - τ⊥)² + τ×²)·‖Π⊥s‖² ≤ τ×²‖s‖²` for gate modes, from outside / cross capacities of any subspace `V` | `containment` | Containment |
+| Theorem 8 (a): containment, `((λ - τ⊥)² + τ×²)·‖Π⊥s‖² ≤ τ×²‖s‖²` for gate directions, from outside / cross capacities of any subspace `V` | `containment` | Containment |
 | Theorem 8 (b): channels with `‖Π⊥sₐ‖² ≤ ε` number `≤ B·dim V / (1 - ε)` | `card_le_of_contained` | Containment |
 | Theorem 5 (a) as a capacity: `Var q ≤ σ²` ⇒ `\|Δ\| ≤ σ/√(p(1-p))` for any event | `abs_contrast_le_of_var`, `inner_condMean_apply` | Containment |
 | Theorem 8 (c), (d): spiked–incoherent class `P = S + N`, `S` on `V`, variance bounds on `N` off `V` ⇒ containment and `m ≤ B·dim V/(1 - ε)` | `spiked_containment`, `spiked_count` | Containment |
@@ -42,7 +42,7 @@ eigenvalues `≥ t` (modes that open) or `≤ -t` (modes that close).
 ## Hypotheses, as formalized
 
 * Theorem 3 assumes `⟪E_S x, x⟫ < t‖x‖²` for `x ≠ 0` (largest eigenvalue of `E_S` below `t`), which is weaker than
-  `‖E_S‖_op < t`. The closing-mode half assumes the same of `-E_S`.
+  `‖E_S‖_op < t`. The closing half assumes the same of `-E_S`.
 * Theorem 5 (c) is proved twice: in an arbitrary inner product space `F` of fingerprints (`Variance.lean`), and for
   the actual fingerprints with the Frobenius norm `‖D‖²_F = tr(D²)` and channels `qₐ = sₐᵀPsₐ` (`GateBound.lean`),
   where the frame bound is `Σₐ (sₐᵀDsₐ)² ≤ B‖D‖²_F` for symmetric `D` (`B = 1` for orthonormal channels).

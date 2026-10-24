@@ -29,7 +29,7 @@ gelu_1l: NeelNanda/GELU_1L512W_C4_Code, a one-layer GELU toy model (D 512, 8 hea
         of a 2·WIN-token GPT-2 span and get <|BOS|> at position 0. The MLP input is ln2's output, affine included; after the
         MLP only ln_final and the unembedding remain. gelu_2l: NeelNanda/GELU_2L512W_C4_Code, the same with two layers
         (layer 0's MLP is followed by block 1, layer 1's only by ln_final and the unembedding).
-gelu_1l+<name>: gelu_1l with its MLP replaced by downstream_amp/mode_bound/mlp/<name>.pt, an MLP of another width /
+gelu_1l+<name>: gelu_1l with its MLP replaced by downstream_amp/gate_bound/mlp/<name>.pt, an MLP of another width /
         activation retrained by amp_mlp_width.py with everything else frozen (d_mlp scaling at fixed d_model).
 relu2_12l, sq_12l, bilinear_12l, swiglu_12l: Elriggs' 12-layer models (D 768, 6 heads, tensor_model.py), one training recipe
         (modded-nanogpt, Muon) that differs only in the MLP: ReLU², x², bilinear, SwiGLU. Same block structure as swiglu
@@ -45,7 +45,7 @@ from torch.nn import functional as F
 
 ROOT_DIR = Path(__file__).resolve().parent
 BIGRAM = ROOT_DIR / "dct_etc" / "bigram"
-RETRAINED = ROOT_DIR / "downstream_amp" / "mode_bound" / "mlp"     # gelu_1l MLPs retrained by amp_mlp_width.py
+RETRAINED = ROOT_DIR / "downstream_amp" / "gate_bound" / "mlp"     # gelu_1l MLPs retrained by amp_mlp_width.py
 
 
 def swiglu(win):
