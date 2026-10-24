@@ -18,5 +18,5 @@ e2e-sae-rep/
 privilege_experiment.py
 weight_experiment.py
 *_weights
-train.ipynb
+*.ipynb
 sparse-asymmetric/downstream_amp
