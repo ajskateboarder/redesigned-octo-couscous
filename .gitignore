@@ -20,3 +20,4 @@ weight_experiment.py
 *_weights
 *.ipynb
 sparse-asymmetric/downstream_amp
+old/
