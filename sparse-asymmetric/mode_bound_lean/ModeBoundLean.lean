@@ -5,3 +5,5 @@ import ModeBoundLean.Budget
 import ModeBoundLean.Variance
 import ModeBoundLean.Width
 import ModeBoundLean.GateBound
+import ModeBoundLean.Sharp
+import ModeBoundLean.Containment

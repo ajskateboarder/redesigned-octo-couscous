@@ -3,7 +3,7 @@
 This note proves the statements in *Dense-Gate Mode Bound: Theorem and Empirical Verification Plan*, sharpens two of them,
 replaces the sketched budget step (ii) with a proof, and reports the checks of §3 of that plan. Code:
 `amp_mode_bound.py` (checks on one run), `amp_mlp_width.py` (retrained MLPs for the d_mlp scaling test),
-`amp_mode_bound.sh` (everything), `amp_mode_bound_table.py` (summary). Logs: `downstream_amp/checks/amp_mode_bound_*.log`.
+`amp_mode_bound.sh` (everything), `amp_mode_bound_table.py` (summary), `amp_bound_tightness.py` (how tight Theorems 5 and 7 are, §3.9c), `amp_containment.py` (Theorem 8's class on trained models, §3.9d). Logs: `downstream_amp/checks/amp_mode_bound_*.log`.
 
 ## 0. Summary
 
@@ -47,6 +47,28 @@ replaces the sketched budget step (ii) with a proof, and reports the checks of �
   * *Gates at a fixed contrast γ* are limited by a linear budget Σ_a p_a A_a ≤ d·B′ (Theorem 7), independent of width.
   * The trained LM is at its width limit only at d_mlp = 32 (about 13 channels from 32 neurons). From 256 up it is an
     order of magnitude below both limits, so for this model width is not what limits the number of gates.
+
+* **Tightening Theorems 5 and 7 (§2, §3.9c).**
+  * Theorem 7 is attained, and so is Theorem 5 given κ: neither can be improved from (d, p, γ) or (d, p, γ, κ).
+  * Theorem 5's unconditional bound follows from the linear budget, and is d/γ times weaker than it.
+  * Theorem 7′ needs a frame bound only for channels open at the same row, so superposed dictionaries gain nothing:
+    m ≤ d/(pγ) if co-open channels are orthonormal.
+  * Theorem 7* subtracts a matrix quantile Y₀ from every fingerprint. It is 1.5–2.5× tighter than Theorem 7 on the
+    trained models.
+  * Searched directly, with arbitrary events, the trained fingerprints admit only 9–13 orthonormal gates at γ = 25
+    and 2–7 at γ = 50, all held-out replicated. Neuron and halfspace openers reach a third to all of them. The best
+    bound is still 6–20× above that, because no sum of per-direction quantities sees whether the rows' top directions
+    cluster.
+* **The gated subspace (Theorem 8, §3.9d).**
+  * A class-level theorem in the style of the computation-in-superposition literature. Suppose fingerprints are k
+    coherent directions plus an incoherent remainder, for any metric, width, events or implementation. Then every gate
+    above γ_N (about 2.5, independent of d) lies in the coherent subspace up to ε ≈ γ_×²/(γ − γ_N)², and there are at
+    most about k/(1 − ε) gates.
+  * Hypotheses about single rows cannot do this: rank-one rows attain d/(pγ).
+  * Trained models belong to the tolerant version of the class with k ≈ 25 and a 5–9× more coherent remainder than
+    isotropic. That V contains essentially all their gates, from d_mlp 32 to 8192.
+  * The narrow MLP is in the class exactly, with N = 0 and m ≤ H.
+  * Lean-checked core: `ModeBoundLean/Containment.lean`.
 
 ## 1. Setup and notation
 
@@ -302,6 +324,157 @@ Theorem 5 charges each gate p(1−p)γ² against a variance budget. Theorem 7 ch
 so it is linear in γ. In the planted-gate experiments (§4) the teacher's contrasts follow exactly this law:
 Σ_a p A_a ≈ const as m grows.
 
+### Sharper budgets (Theorems 7′ and 7*), and how far Theorems 5 and 7 can be tightened
+
+Write Δ = E[q | E] − E[q | Eᶜ] with q = sᵀPs, so a gate at level γ has Δ ≥ δ := γ/d. The results below sharpen
+Theorem 7, show that Theorem 5 adds nothing to it unconditionally, and show that both are attained, so any further gain
+has to use more of the fingerprint distribution than d, p, γ and κ.
+
+**(a) What Theorem 7 drops.** Exactly, p·Δ = E[q] − E[q | Eᶜ]. Theorem 7's per-gate step p·Δ ≤ E[q] discards the
+channel's off-mean, and nothing else. *Proof.* E[q] = pE[q|E] + (1−p)E[q|Eᶜ]. ∎
+
+**(b) Theorem 7′ (co-open frame).** Let F_on(ρ) = Σ_{a : ρ ∈ E_a} s_a s_aᵀ, the channels open at row ρ. Then
+
+  Σ_a p_a Δ_a ≤ E[⟨P_ρ, F_on(ρ)⟩] ≤ E[λ_max(F_on(ρ))] ≤ B_on := max_ρ λ_max(F_on(ρ)),
+
+so m ≤ B_on·d/(p_min γ). Since F_on(ρ) ⪯ Σ_a s_a s_aᵀ, this is never weaker than Theorem 7, and it does not depend on
+how many channels there are in all: if the channels open at any one row are orthonormal, m ≤ d/(p_min γ) for any
+dictionary.
+
+*Proof.* p·Δ ≤ p·E[q | E] = E[q 1_E], because E[q | Eᶜ] ≥ 0. Sum over a and exchange the sums:
+Σ_a E[q_a 1_{E_a}] = E[Σ_{a open} s_aᵀP s_a] = E⟨P, F_on⟩. Finally ⟨P, F⟩ ≤ λ_max(F)·tr P for P ⪰ 0, and tr P = 1. ∎
+
+This settles the superposition question of Theorem 5″. Parts (b) and (c) there allow up to about
+4d²/(p(1−p)γ²) gates on a random dictionary. That is 4d/((1−p)γ) times more than d/(pγ), about 45× at d = 512, γ = 50.
+Those gates cannot coexist unless many of them are open at the same rows along overlapping channels. Even plain
+Theorem 7 excludes them. For m random unit channels, B′ → (1 + √(m/d))² (the Marchenko–Pastur edge), so
+m·pγ/d ≤ (1 + √(m/d))², which for pγ > 1 forces m ≤ d/(√(pγ) − 1)² (asymptotically in d and m).
+
+**(c) Theorem 7* (quantile shift).** For one gate, any constant y and any split q = y + a − b with a, b ≥ 0,
+
+  p(1−p)·Δ ≤ (1−p)·E[a] + p·E[b],
+
+with equality when y is the p-quantile of q, a = (q − y)₊, b = (q − y)₋ and E = {q > y}. (This is the CVaR formula
+p(1−p)·max_{μ(E)=p} Δ = min_y [(1−p)E(q−y)₊ + pE(y−q)₊]. Taking y = 0, a = q is Theorem 7.) In matrix form, take any
+symmetric Y₀ and positive Y⁺_ρ, Y⁻_ρ with P_ρ − Y₀ = Y⁺_ρ − Y⁻_ρ, and put y = sᵀY₀s, a = sᵀY⁺s, b = sᵀY⁻s. Then every
+gate has p(1−p)Δ ≤ sᵀA s with A = E[(1−p)Y⁺ + pY⁻] ⪰ 0, and gates of prevalence p satisfy
+
+  m·p(1−p)·δ ≤ B′·tr A,  and, as in Theorem 7,  m·p(1−p)·δ ≤ B′·Σ_{i≤m} λ_i(A).
+
+The best split is Y^± = (P − Y₀)_±. Then tr A = β_p(Y₀) := E[(1−p) tr(P − Y₀)₊ + p tr(P − Y₀)₋]. Y₀ = 0 gives
+A = (1−p)P̄, which is Theorem 7. A Y₀ near the rows' typical fingerprint (§3.9c uses Y₀ = θP̄) removes the part of each
+channel's mean that all rows share. Theorem 7 counts that part as budget, but no event can spend it.
+
+*Proof.* p(1−p)Δ = E[(q − y)(1_E − p)]. On E, (a − b)(1 − p) ≤ (1−p)a; off E, −p(a − b) ≤ pb. ∎
+
+**(d) Theorem 5 adds nothing to the linear budget unconditionally.** Closing gates are opening gates of Eᶜ, so every
+gate has min(p, 1−p)·|Δ| ≤ E[q]. Hence orthonormal gates with p(1−p) ≥ c satisfy m·c·δ ≤ 1, since
+p(1−p) ≤ min(p, 1−p). Because 0 ≤ q ≤ 1 gives |Δ| ≤ 1, this implies Theorem 5's unconditional m·c·δ² ≤ 1 and improves
+it by the factor 1/δ = d/γ (about 20 at γ = 25). Theorem 5 adds information only through a small κ (κ ≤ 1 − 1/d never
+helps) or through the spectrum of K. In the trained models that happens only at γ = 100 (§3.9c).
+
+**(e) Both theorems are attained.** Take r rows of weight 1/r and rj ≤ d orthonormal vectors b(ρ, k), k < j. Row ρ has
+fingerprint P_ρ = (1/j)Σ_k b(ρ,k)b(ρ,k)ᵀ, and gate (ρ′, k) opens on row ρ′ along b(ρ′, k). Every gate has p = 1/r and
+Δ = 1/j, so the m = rj gates have m·p·δ = 1: equality in Theorem 7 and in 7′ (B′ = B_on = 1). In contrast units this
+is m = d/(pγ) with γ = d/j, for any p = 1/r and γ ≥ 1/p. The same construction makes Theorem 5 (a) and (c) equalities:
+q_a is two-valued, so Var q_a = p(1−p)δ², and Σ_a Var q_a = κ = 1/j − 1/m. So Theorem 7 cannot be improved from
+(d, p, γ), and Theorem 5 cannot be improved from (d, p, γ, κ). What is loose in Theorem 5 is only the relaxation κ ≤ 1.
+
+**(f) Tried, small gain.** Var(sᵀPs) = ⟨ssᵀ, K ssᵀ⟩ only sees K on fully symmetric 4-tensors. So Theorem 5(b) holds
+with K replaced by its full symmetrisation K̂(X) = ⅓E[⟨D, X⟩D + 2DXD], D = P − P̄ (tr K̂ = ⅔κ). On `gelu_1l` (one-off
+800-step Lanczos, not in the scripts) this moves the spectral count from 437 to 357 at γ = 25 and from 58 to 47 at
+γ = 50.
+
+Lean: (a) `mass_mul_contrast_eq`; (b) `linear_budget_on`, `gate_count_on`; (c) `contrast_le_split`, `quantile_budget`,
+`gate_count_quantile` (trace form; the spectral form needs von Neumann's inequality, as for Theorem 7); (d)
+`linear_budget_gate_abs`, `gate_count_abs`, `contrast_abs_le_one`, `gate_count_orthonormal_linear`; (e)
+`linear_budget_sharp` (the Theorem 7 half). All are in `ModeBoundLean/Sharp.lean`.
+
+### Theorem 8 (the gated subspace: containment, and the spiked–incoherent class)
+
+The budgets above cannot be improved from (d, p, γ) alone, so a sharper bound needs a hypothesis. Hypotheses about
+single rows do not help. A row with *rank-one* fingerprint vvᵀ, v = j^{-1/2}Σ_{a∈S_ρ} s_a, gives each of its j open
+channels the share 1/j. Built from such rows, the construction of (e) attains d/(pγ). So no bound on the rank or
+concentration of P_ρ reduces the count. What separates that construction from trained models is how rows *share*
+directions. Theorem 8 makes this a class hypothesis, in the same spirit as the sparsity assumptions of work on
+computation in superposition (Adler and Shavit, arXiv:2409.15318; Hänni et al., arXiv:2408.05451).
+
+The setting is general: P_ρ is any PSD row operator. For a fingerprint, P_ρ = GᵀG/Z with any downstream network and
+any PSD output metric. Events are arbitrary, and nothing is assumed about how a gate is implemented or how many neurons
+carry it. Fix a subspace V of dimension k, with projectors Π, Π⊥. A *gate mode* at level t = γ/d is an eigenpair
+M_E s = λs with λ ≥ t.
+
+**(a) Containment.** Define the *outside capacity* τ⊥(V) = sup_E λ_max(Π⊥M_EΠ⊥) and the *cross capacity*
+τ×(V) = sup_E ‖Π⊥M_EΠ‖. Then every gate mode with λ > τ⊥ has
+
+  ((λ − τ⊥)² + τ×²)·‖Π⊥s‖² ≤ τ×²·‖s‖².
+
+So strong gates are confined to V: the leaked share falls like τ×²/(λ − τ⊥)².
+
+*Proof.* Write s = v + w with v ∈ V, w ⊥ V. Then λ‖w‖² = ⟨M s, w⟩ = ⟨M v, w⟩ + ⟨M w, w⟩ ≤ τ×‖v‖‖w‖ + τ⊥‖w‖², so
+(λ − τ⊥)‖w‖ ≤ τ×‖v‖. Square this and use ‖s‖² = ‖v‖² + ‖w‖². ∎
+
+**(b) Counting.** Unit channels with frame bound B, each with ‖Π⊥s_a‖² ≤ ε, satisfy m·(1 − ε) ≤ B·k.
+
+*Proof.* With e_1…e_k an orthonormal basis of V, Σ_a‖Πs_a‖² = Σ_i Σ_a⟨e_i, s_a⟩² ≤ B·k, and each term on the left is
+≥ 1 − ε. ∎
+
+**(c) The spiked–incoherent class.** Suppose every row splits as P_ρ = S_ρ + N_ρ. The *coherent part* S_ρ ⪰ 0 is
+supported in V. The *incoherent part* N_ρ = O_ρΛ_ρO_ρᵀ ⪰ 0 has an orientation O_ρ independent of (Λ_ρ, S_ρ) whose
+fourth moments are those of Haar measure. Then for any event, any opener and any implementation:
+
+  τ⊥ ≤ γ_N/d,  γ_N := √( (2E‖N‖²_F + Var tr N) / (p(1−p)) ),
+  τ× ≤ γ_×/d,  γ_× := √( E‖N‖²_F / (p(1−p)) ) · d/√((d−1)(d+2)).
+
+So for γ > γ_N every gate mode has ‖Π⊥s‖² ≤ ε = γ_×²/(γ_×² + (γ − γ_N)²), and m ≤ B·k/(1 − ε).
+
+The constants do not depend on d, on the width, or on the orientation of anything. Because N ⪯ P,
+E‖N‖²_F ≤ E‖P‖²_F ≤ 1 and Var tr N ≤ ¼, so γ_N ≤ √(2.25/(p(1−p))) (= 5 at p = 0.1) for *every* model in the class. With
+the concentrated rows measured here (E‖P‖²_F ≈ 0.17), γ_N ≈ 2.5 and γ_× ≈ 1.4. At γ = 25 that gives ε ≈ 0.004.
+**In this class, gates above γ_N lie in the coherent subspace, and there are at most about dim V of them.**
+
+*Proof.* S lives in V, so Π⊥M_EΠ⊥ and Π⊥M_EΠ see only N. For a unit w ⊥ V, x = O_ρᵀw is uniform on the sphere. From
+E x_i⁴ = 3/(d(d+2)) and E x_i²x_j² = 1/(d(d+2)):
+
+  E[(wᵀNw)² | Λ] = ((tr Λ)² + 2‖Λ‖²_F)/(d(d+2)),  E[wᵀNw | Λ] = tr Λ/d,
+
+hence Var(wᵀNw) ≤ (2E‖N‖²_F + Var tr N)/d². For orthonormal v ∈ V and w ⊥ V, the pair (Oᵀv, Oᵀw) has
+E[x_i²y_i²] = 1/(d(d+2)) and E[x_iy_ix_jy_j] = −1/((d−1)d(d+2)) for i ≠ j. So vᵀNw has mean 0 and
+E(vᵀNw)² = (d‖Λ‖²_F − (tr Λ)²)/((d−1)d(d+2)) ≤ ‖Λ‖²_F/((d−1)(d+2)). These bounds hold uniformly over directions, and
+Theorem 5(a) (|Δ| ≤ sd/√(p(1−p)) for any event) turns them into the two capacities. Finish with (a) and (b). ∎
+
+**(d) Tolerance.** Exact isotropy is not needed. The proof uses only the two variance bounds
+Var(wᵀNw) ≤ σ⊥²‖w‖⁴ and Var(vᵀNw) ≤ σ×²‖v‖²‖w‖². If they hold with η⊥ and η× times the isotropic values (an
+*η-incoherent* remainder), the constants become √η⊥·γ_N and √η×·γ_×. The class then has parameters (k, η⊥, η×, p) and
+E‖N‖²_F, and nothing is fitted.
+
+**Corollary 8.1 (only directions with concentrated variation gate).** Let N_c be the largest number of orthonormal
+directions s whose own share has Var(sᵀPs) ≥ c, with c = p(1−p)(γ/d)². Every family of orthonormal gates at level γ
+(prevalence p, any events, any implementation, opening or closing) satisfies m ≤ N_c. In the class of (c) and (d) this
+combines with the count above to give m ≤ min(N_c, B·k/(1−ε)).
+
+*Proof.* By Theorem 5(a) each gate's own channel quantity has variance ≥ p(1−p)Δ² ≥ c, and the gates are orthonormal. ∎
+
+The corollary sharpens the count from the dimension of the coherent subspace to its directions of *concentrated*
+variation. It excludes the coherent directions whose variation is spread thin (§3.9e). It adds rigor but little
+explanation: that a gate needs variance concentrated in its own direction is close to the definition of a gate, so
+"why about 10 gates" becomes "why about N_c concentrated directions". N_c is the maximum of a quartic form over
+orthonormal families. The computable relaxations (Ky Fan on K or K̂) overcount, because they credit mixing and
+off-diagonal variance. The values in §3.9d are greedy estimates, i.e. lower bounds on N_c, so they show what the bound
+gives but do not certify it.
+
+**What it explains, and what it does not.** It explains why the count does not grow with width, metric or
+implementation: only coherent directions can carry gates, and sensitivity that is incoherent across rows cannot give
+contrast beyond O(1). It does not explain how many of V's directions gate. Inside V, every statistic used here allows
+all of them (§3.9d). Theorem 8 is a population statement. On a finite sample the variances carry sampling error,
+which is why an isotropic remainder shows a cross capacity of 4–6 rather than 1.4 at N = 7680 (§3.9d).
+
+Lean: (a) `containment`; (b) `card_le_of_contained`; Theorem 5(a) as a capacity bound, `abs_contrast_le_of_var`;
+(c), (d) `spiked_containment` and `spiked_count`, with the two variance bounds as hypotheses (over any finite row
+distribution); Corollary 8.1, `concentratedCount` and `card_le_concentratedCount`. All are in
+`ModeBoundLean/Containment.lean`. The Haar fourth-moment computation in (c) is not
+formalized: Mathlib has no Haar moments.
+
 ### Proposition 6 (width lower bound for exact gates)
 
 Let f(x) = W₂φ(W₁x + b₁) + b₂ with width H and φ ∈ C². Every Hessian of every output lies in an H-dimensional space:
@@ -337,8 +510,12 @@ the Hessian. So Proposition 6 bounds exact or Hessian-faithful storage, not the 
 * d_mlp-free bounds on gate modes per opener (Proposition 1(d), Theorem 5(d)) and on distinct channels in total
   (Theorem 5).
 * Under ‖QMQ‖ < γ/d (implied by ‖E_S‖ < γ/d): at most r ≤ k gate modes of each sign per k-neuron opener.
+* Sharper budgets (Theorems 7′, 7*), the domination of Theorem 5's unconditional bound by the linear budget, and a
+  construction attaining Theorems 7 and 5 (given κ). So neither can be improved from (d, p, γ) or (d, p, γ, κ) alone.
 
 **Not proved:**
+* A computable bound close to the number of gates the trained fingerprints actually admit (§3.9c). Every bound here
+  stays 6–20× above it at γ ≤ 50.
 * That trained models satisfy ‖E_S‖ < γ/d. Section 3 shows that for single neurons they do not.
 * That the observed small count has the rank-lemma cause. Section 3 shows that the bound 2k is not tight, and that the
   small count tracks the top of K's spectrum instead.
@@ -541,6 +718,120 @@ k_eff = (tr F)²/‖F‖²_F with F = Σ_a s_a s_aᵀ is the effective dimension
 * **m/B₀ ≈ k_eff.** For m ≫ k, m/B₀ ≈ m/(1 + m/k) ≈ k. The robust number in the trained models is therefore the
   dimension, about 15, of the gated subspace, not the channel count, which grows as γ falls.
 
+### 3.9c How tight are Theorems 5 and 7? (`amp_bound_tightness.py`)
+
+Theorems 5 and 7 bound gates over *arbitrary* events of prevalence p. For a fixed channel the best such event is the
+top-p rows of q_s = sᵀPs, so the number of gates a model's fingerprints admit can be searched for directly. The search
+is greedy over orthonormal channels: alternate E ← top-p rows of q_s and s ← top eigenvector of M_E compressed off the
+channels already found, from 32 starts per channel. On held-out rows the channel's event is q_s above its
+fitting-row threshold. The search gives a lower bound on the true maximum; the theorems give upper bounds.
+
+p = 0.1, orthonormal channels (B = B′ = 1), counts at γ = 25 / 50 / 100. "Neuron" and "halfspace" count the same
+channels when the opener is restricted: top 10% of one neuron's pre-activation, or of o·z with o the regression
+direction of q_s on whitened z.
+
+| model | admitted (held-out) | neuron | halfspace | Thm 7 spectral | **Thm 7*** spectral | Thm 5 spectral |
+|---|---|---|---|---|---|---|
+| gelu_1l | 9 / 2 / 1 (9 / 2 / 1) | 3 / 1 / 0 | 4 / 1 / 1 | 187 / 80 / 31 | 118 / 42 / 10 | 437 / 58 / 5 |
+| gelu_2l L1 | 10 / 4 / 0 (9 / 4 / 0) | 5 / 1 / 0 | 7 / 3 / 0 | 191 / 84 / 34 | 121 / 45 / 13 | 543 / 74 / 5 |
+| d_mlp 32 | 13 / 7 / 3 (13 / 7 / 3) | 7 / 3 / 0 | 12 / 7 / 3 | 204 / 102 / 51 | 82 / 41 / 17 | 600 / 145 / 30 |
+| d_mlp 512 | 13 / 4 / 1 (13 / 4 / 1) | 5 / 0 / 0 | 9 / 3 / 0 | 197 / 88 / 36 | 117 / 46 / 14 | 531 / 92 / 10 |
+| d_mlp 8192 | 12 / 4 / 1 (12 / 4 / 1) | 4 / 1 / 0 | 9 / 1 / 1 | 192 / 85 / 34 | 125 / 48 / 14 | 574 / 91 / 11 |
+| d_mlp 2048, Muon | 11 / 4 / 1 (11 / 4 / 1) | 5 / 2 / 0 | 7 / 3 / 1 | 189 / 82 / 33 | 118 / 44 / 13 | 510 / 83 / 10 |
+| d_mlp 2048, ReLU² | 11 / 4 / 1 (11 / 4 / 1) | 5 / 2 / 0 | 8 / 3 / 1 | 192 / 85 / 34 | 126 / 49 / 15 | 605 / 101 / 12 |
+
+Theorem 7 without the spectrum is 205 / 102 / 51 in every row. Thm 7* uses Y₀ = θP̄ with the best of θ ∈ {0, 1, 2}.
+Its trace β_p(θP̄) is 0.60–0.69, and 0.36 at d_mlp = 32, against Theorem 7's 0.9.
+
+* **The opener class is not where the gap is.** With arbitrary events the fingerprints admit 9–13 orthonormal gates at
+  γ = 25, 2–7 at γ = 50 and 0–3 at γ = 100. All of them replicate on held-out rows. Halfspace openers reach about
+  half to all of them, and single neurons a third to a half. So the attractor counts of `downstream_amp.py` are within
+  2–3× of everything the model's sensitivity structure allows at these contrasts, whatever the openers are.
+* **Thm 7* is the tightest bound at γ ≤ 50**: 1.5–2.5× below Theorem 7 (the most at d_mlp = 32, whose rows share the
+  most of P̄). At γ = 100 Theorem 5 spectral is the tightest (5–12), except at d_mlp = 32 (30 against 17). Theorem 5
+  beats Thm 7* only there, as §2 (d) predicts.
+* **What remains is 6–20× at γ ≤ 50.** Theorem 7's accounting on the admitted gates (γ = 25) shows where it goes:
+  * Each gate spends only 24–31% of its channel's mean on its contrast. The rest is the off-mean (on/off ratio 4–6).
+    This is the slack (a) identifies. Thm 7* recovers part of it.
+  * The gates together use Σ p·Δ = 0.08–0.19 of the unit budget. Their on-rows give only 10–25% of their sensitivity
+    to the channels open there (E⟨P, F_on⟩ = 0.10–0.25, about one open channel per row).
+  * Rows' fingerprints are concentrated (effective rank 7–8, §3.1), but along directions that are not shared by 10%
+    of rows. A gate needs one direction that carries ≥ γ/d of the mass on a tenth of the rows. All the bounds here are
+    sums of per-direction or per-row quantities (means, quantile parts, variances, Ky Fan sums), and none of them sees
+    whether the rows' top directions cluster. The construction in §2 (e) shows they cannot without more input: it
+    meets them with equality.
+
+### 3.9d Do trained fingerprints fit the spiked–incoherent class? (`amp_containment.py`)
+
+Theorem 8 is a statement about a class, so measuring a model only says whether it belongs to the class and with which
+parameters. For V = the top-k eigenvectors of R = E[(P − P̄)²], `amp_containment.py` measures:
+
+* the outside and cross capacities, by search (alternating between the best event and the top eigen- or singular
+  vector). Searches give lower bounds, so the counts derived from them are estimates, not certificates;
+* the same capacities after Haar-rotating every row inside V⊥, which gives an isotropic remainder at this sample size,
+  and the ratio η = (real / isotropic)²;
+* the orthonormal gates a search finds inside V.
+
+Columns for k = 25, in contrast units, p = 0.1:
+
+| model | τ⊥: real / isotropic (η⊥) | τ×: real / isotropic (η×) | ε at γ = 25 / 50 / 100 | k/(1−ε), best k | gates inside V (k = 25) | gates admitted (§3.9c) |
+|---|---|---|---|---|---|---|
+| gelu_1l | 8.5 / 1.3 (45) | 14.8 / 4.6 (10) | 0.44 / 0.11 / 0.03 | 45 / 24 / 10 | 8 / 1 / 1 | 9 / 2 / 1 |
+| gelu_2l L1 | 9.5 / 1.2 (61) | 15.7 / 5.7 (8) | 0.51 / 0.13 / 0.03 | 51 / 20 / 10 | 9 / 4 / 0 | 10 / 4 / 0 |
+| d_mlp 32 | 8.1 / 0.2 (1185) | 11.4 / 1.4 (63) | 0.31 / 0.07 / 0.02 | 36 / 19 / 11 | 13 / 7 / 3 | 13 / 7 / 3 |
+| d_mlp 512 | 8.9 / 1.0 (83) | 16.6 / 4.0 (17) | 0.52 / 0.14 / 0.03 | 52 / 26 / 10 | 12 / 4 / 0 | 13 / 4 / 1 |
+| d_mlp 8192 | 9.3 / 1.2 (57) | 15.5 / 4.7 (11) | 0.49 / 0.13 / 0.03 | 49 / 22 / 10 | 10 / 3 / 1 | 12 / 4 / 1 |
+
+"Best k" is the minimum over k ∈ {9, 15, 25, 40}. The best k is 25 at γ = 25, 9 or 15 at γ = 50, and 9 at γ = 100.
+
+* **The gated subspace is real, and it is the same size in every model.** About 25 directions contain essentially
+  every gate the fingerprints admit: the search inside V finds 8–13 of the 9–13 at γ = 25, and all of them at γ ≥ 50.
+  Outside those directions the capacities (τ⊥ ≈ 8–9, τ× ≈ 11–17) sit well below γ = 25, so gates are confined
+  (ε ≤ 0.5 at γ = 25, ≤ 0.14 at γ = 50, about 0.03 at γ = 100). The same holds from d_mlp 32 to 8192 and in the
+  two-layer model.
+* **The remainder is not isotropic, but it is η-incoherent with moderate η.** Its capacities are 5–9× (outside) and
+  3–4× (cross) those of an isotropic remainder: η⊥ ≈ 45–85, η× ≈ 8–17. So trained models belong to the class of
+  Theorem 8 (d) with k ≈ 25. They do not belong to the strict isotropic class (c).
+* **The narrow MLP is in the class exactly.** With d_mlp = 32, every fingerprint W A Wᵀ lies in span(W), of dimension
+  32. With V ⊇ span(W) the remainder is 0, so τ⊥ = τ× = 0, and Theorem 8 gives m ≤ H whatever the events. The width
+  limit of §4 is the special case N = 0. (The isotropic-null η for d_mlp 32 is large because so little of the
+  fingerprint lies outside the top 25 directions.)
+* **The count k/(1−ε) is 3–5× above the admitted gates** (36–52 against 9–13 at γ = 25), because the theorem allows
+  every direction of V to gate (§3.9c, "inside V"). Theorem 8 explains *where* gates live and why only coherent
+  directions can carry them. It does not explain why about half of V's directions do not gate.
+* **Corollary 8.1 closes most of the remaining gap.** Greedy estimates of N_c (`amp_containment.py --nc-only`), against
+  the gates admitted and k/(1−ε), at γ = 25 / 50 / 100:
+
+  | model | N_c (greedy, a lower bound) | gates admitted | k/(1−ε), best k |
+  |---|---|---|---|
+  | gelu_1l | 16 / 5 / 1 | 9 / 2 / 1 | 45 / 24 / 10 |
+  | gelu_2l L1 | 19 / 7 / 1 | 10 / 4 / 0 | 51 / 20 / 10 |
+  | d_mlp 32 | 15 / 9 / 5 | 13 / 7 / 3 | 36 / 19 / 11 |
+  | d_mlp 512 | 16 / 8 / 1 | 13 / 4 / 1 | 52 / 26 / 10 |
+  | d_mlp 8192 | 18 / 7 / 2 | 12 / 4 / 1 | 49 / 22 / 10 |
+
+  At γ = 25 the estimate is 1.2–1.9× the admitted count, against 3–5× for the dimension bound. These are search
+  estimates, not certificates.
+
+### 3.9e Why only part of V gates (exploratory)
+
+The directions of V that do not gate are not a separate kind of direction. One-off checks on gelu_1l and d_mlp 8192 (not
+in the scripts) split V into the span G of the gates found inside it and its complement C, with dim C = 15–17:
+
+* **Gates compete.** When a gate opens, 20–45% of the sensitivity it gains comes out of the other gates, and the gates'
+  total share is anti-correlated with the rest (−0.88).
+* **C's variation is spread thin.** Each direction of C has own-share amplitude of about 5 (gates: about 15), and its
+  variance is below the cost c. The best *combination* of C's directions still reaches contrast 22–25, just under
+  γ = 25.
+* **Tilting of the gate channels is real but minor.** Directions that point mainly along a gate carry 24–39% of C's mass
+  (2–9% for a random subspace of V of the same dimension). But they carry at most 17% of C's row-to-row variation.
+  Each gate tilts into 10–11 of C's directions, not into private ones. 67–90% of C's variation comes from directions that
+  point mainly into C itself.
+
+So the non-gating part of V is mostly coherent structure below threshold, whose variation is spread over many
+directions. Corollary 8.1 excludes it. Why training concentrates variation in about 10–15 directions and spreads the rest
+is not explained.
+
 ### 3.10 Verdict
 
 1. **The theorem is true.** Lemma 2, Theorems 3 and 3′, Proposition 1 and Theorem 5 are proved above, and Theorem 5
@@ -554,6 +845,16 @@ k_eff = (tr F)²/‖F‖²_F with F = Σ_a s_a s_aᵀ is the effective dimension
    one of those few directions.
 4. **The falsifiable prediction survives.** At fixed d_model = 512, the gate count stays flat or falls from d_mlp 512 to
    8192, across 2 seeds, 2 optimizers and 3 activations, while the number of openers grows about 8×.
+
+5. **The theorems cannot explain the count either, and the opener class is not the reason.** With arbitrary events
+   the fingerprints admit 9–13 gates at γ = 25 (§3.9c), against 82–205 from the sharpest bounds. Those bounds are
+   attained by some distributions (§2 (e)), so closing the gap needs a statement about how the rows' sensitive
+   directions cluster.
+
+6. **Only coherent directions can carry gates (Theorem 8).** This is the explanatory statement the data support for
+   a class of models, with nothing fitted. Trained models fit it with k ≈ 25 coherent directions. What it leaves open
+   is why only about 10 of those 25 gate: that needs structure beyond means and variances, namely which directions
+   share events.
 
 **Open.** The doc's mechanism is "bounded-bandwidth modulation plus a conserved sensitivity budget". The second half is
 what the data support: Proposition 1 and Theorem 5 are the operative bounds. A proof that the count is O(1) would need a
@@ -683,7 +984,13 @@ training finds useful is. Neither the theory nor these experiments identify that
   `d² / (p(1-p)·γ²)` gates (`gate_count_orthonormal`; informative only when this is below `d`), and with overlapping
   channels `m·p(1-p)γ²/d² ≤ B₀·κ`, where `B₀` is the frame bound on trace-zero matrices (Theorem 5″(a),
   `gate_count_traceless`);
-* the width results: the inertia count, and the result that `m` bilinear gates need exactly `2m` neurons.
+* the width results: the inertia count, and the result that `m` bilinear gates need exactly `2m` neurons;
+* the sharper budgets of §2 (`ModeBoundLean/Sharp.lean`): Theorem 7′ (co-open frame), Theorem 7* in trace form,
+  the two-sided budget with Theorem 5's unconditional bound as a `d/γ`-times-sharper corollary, and the construction
+  attaining Theorem 7;
+* Theorem 8 (`ModeBoundLean/Containment.lean`): containment from outside and cross capacities, the count
+  `m ≤ B·dim V/(1 - ε)`, and the spiked–incoherent class with its variance hypotheses (the Haar moments that supply them
+  are proved on paper only).
 
 `mode_bound_lean/README.md` maps each result to its Lean theorem and lists what is not formalized: Theorem 4, the
 spectral forms (5 (b), 5′), the random-channel bounds 5″(b), (c) (like Theorem 4, they need random-matrix results that Mathlib lacks), and
